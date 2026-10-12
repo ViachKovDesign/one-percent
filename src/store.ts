@@ -5,6 +5,45 @@ import { emptyData, ensureGoalWeek, merge, normalize, rollOver, type Data } from
 
 const LOCAL_KEY = 'one-percent:data'
 
+/**
+ * Что пришло в адресе после возвращения из Google через Supabase: ?code=… (успех) или ?error=…
+ * Читаем до создания клиента Supabase — он сам забирает код из адреса.
+ */
+function captureAuthReturn(): { hadCode: boolean; error: string | null } {
+  try {
+    const query = new URLSearchParams(window.location.search)
+    const hash = new URLSearchParams(window.location.hash.slice(1))
+    const description = query.get('error_description') ?? hash.get('error_description')
+    const error = query.get('error') ?? hash.get('error')
+    return { hadCode: query.has('code'), error: error ? explainAuthError(description ?? error) : null }
+  } catch {
+    return { hadCode: false, error: null }
+  }
+}
+
+/** Переводим частые ошибки входа на понятный язык и подсказываем, где чинить. */
+export function explainAuthError(raw: string): string {
+  const text = raw.replace(/\+/g, ' ')
+  if (/exchange external code/i.test(text)) {
+    return 'Google не принял ключ Supabase. Проверь Client Secret в Supabase → Authentication → Sign In / Providers → Google.'
+  }
+  if (/provider is not enabled|unsupported provider/i.test(text)) {
+    return 'Вход через Google выключен в Supabase. Включи его: Authentication → Sign In / Providers → Google.'
+  }
+  if (/access_denied|access denied/i.test(text)) {
+    return 'Google не дал доступ. Проверь, что твоя почта есть в Google Cloud → Audience → Test users.'
+  }
+  if (/code verifier|flow state|auth code/i.test(text)) {
+    return 'Вход начался в одном окне, а закончился в другом. Открой сайт в браузере (не с иконки на экране) и войди ещё раз.'
+  }
+  if (/relation .*user_data.* does not exist|user_data/i.test(text)) {
+    return 'В базе нет таблицы для дел. Выполни скрипт в Supabase → SQL Editor.'
+  }
+  return `Ошибка входа: ${text}`
+}
+
+const AUTH_RETURN = captureAuthReturn()
+
 export const supabase: SupabaseClient | null =
   SUPABASE_URL && SUPABASE_ANON_KEY
     ? // PKCE: Supabase возвращает ?code= в адресе, а не #access_token — не путается со входом в календарь
@@ -78,6 +117,8 @@ export function useStore() {
   const [data, setData] = useState<Data>(() => prepareDay(loadLocal()))
   const [session, setSession] = useState<Session | null>(null)
   const [status, setStatus] = useState<SyncStatus>('local')
+  const [authError, setAuthError] = useState<string | null>(AUTH_RETURN.error)
+  const [syncError, setSyncError] = useState<string | null>(null)
   const dataRef = useRef(data)
   const timer = useRef<number | undefined>(undefined)
   const syncing = useRef(false)
@@ -106,8 +147,10 @@ export function useStore() {
       setData(latest)
       saveLocal(latest)
       setStatus('synced')
-    } catch {
+      setSyncError(null)
+    } catch (error) {
       setStatus(navigator.onLine ? 'error' : 'offline')
+      if (navigator.onLine) setSyncError(explainAuthError((error as { message?: string })?.message ?? String(error)))
     } finally {
       syncing.current = false
     }
@@ -116,8 +159,24 @@ export function useStore() {
   // Вход и выход
   useEffect(() => {
     if (!supabase) return
-    supabase.auth.getSession().then(({ data }) => setSession(data.session))
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, next) => setSession(next))
+    void (async () => {
+      const init = await supabase.auth.initialize()
+      const { data } = await supabase.auth.getSession()
+      setSession(data.session)
+      if (!data.session && AUTH_RETURN.hadCode) {
+        setAuthError(
+          init.error
+            ? explainAuthError(init.error.message)
+            : 'Google вернул в приложение, но вход не завершился. Попробуй ещё раз в браузере.',
+        )
+      }
+      // Убираем ?code= и ?error= из адреса, чтобы они не мешали при перезагрузке
+      if (AUTH_RETURN.hadCode || AUTH_RETURN.error) history.replaceState(null, '', window.location.pathname)
+    })()
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, next) => {
+      setSession(next)
+      if (next) setAuthError(null)
+    })
     return () => sub.subscription.unsubscribe()
   }, [])
 
@@ -189,5 +248,5 @@ export function useStore() {
     await supabase.auth.signOut()
   }, [])
 
-  return { data, change, session, status, signIn, signOut, canSync: Boolean(supabase), sync }
+  return { data, change, session, status, signIn, signOut, canSync: Boolean(supabase), sync, authError, syncError }
 }

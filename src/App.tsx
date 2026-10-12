@@ -799,6 +799,7 @@ function ProfileScreen({
               <>
                 <div className="recognition-label">{store.session.user.email}</div>
                 <div className={`muted-copy status-${store.status}`}>{STATUS_TEXT[store.status]}</div>
+                {store.syncError && store.status === 'error' && <div className="auth-error">{store.syncError}</div>}
                 <div className="chip-row">
                   <Action className="suggestion-chip" onClick={() => void store.sync()}>
                     <Icon name="repeat" size="sm" /> Синхронизировать
@@ -809,6 +810,7 @@ function ProfileScreen({
             ) : (
               <>
                 <div className="muted-copy">Войди, чтобы дела были на всех твоих устройствах.</div>
+                {store.authError && <div className="auth-error">{store.authError}</div>}
                 <Action className="primary-button google" onClick={() => void store.signIn()}>
                   Войти через Google
                 </Action>
@@ -858,7 +860,8 @@ function ProfileScreen({
 export default function App() {
   const store = useStore()
   const { data, change } = store
-  const [route, setRoute] = useState<Route>({ name: 'today' })
+  // Вход не удался — сразу показываем профиль с объяснением
+  const [route, setRoute] = useState<Route>(() => (store.authError ? { name: 'profile' } : { name: 'today' }))
   // null — «сегодня»: так после полуночи приложение само переходит на новый день
   const [pickedDate, setPickedDate] = useState<string | null>(null)
   const [, setWakeTick] = useState(0)
@@ -876,6 +879,11 @@ export default function App() {
       window.removeEventListener('focus', wake)
     }
   }, [])
+
+  // Ошибка входа может прийти не сразу (после обмена кода) — тогда тоже открываем профиль
+  useEffect(() => {
+    if (store.authError) setRoute({ name: 'profile' })
+  }, [store.authError])
 
   useEffect(() => {
     if (!toast) return

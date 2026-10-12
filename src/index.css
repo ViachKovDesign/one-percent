@@ -1598,6 +1598,17 @@ button.subtask > .icon:last-child {
   }
 }
 
+.auth-error {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--peach-soft);
+  color: var(--danger);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
 /* Календарь */
 .calendar-banner {
   display: flex;
