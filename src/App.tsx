@@ -1,0 +1,774 @@
+import { useMemo, useState } from 'react'
+import {
+  addDays, formatChip, formatLong, formatRange, formatRelative, fromKey, plural,
+  todayKey, WEEKDAYS_SHORT, weekStart,
+} from './dates'
+import {
+  dayStreak, habitStreak, liveTasks, makeTask, newId,
+  type Data, type Habit, type Task, type Template,
+} from './model'
+import { parseQuick } from './parse'
+import { useStore, type SyncStatus } from './store'
+import {
+  Action, BottomNav, Checkbox, Icon, Leaf, ProgressRing, ScreenHeader, TagChip, type Tab,
+} from './ui'
+
+type Route = { name: Tab } | { name: 'add' } | { name: 'detail'; taskId: string }
+type Change = (fn: (current: Data) => Data) => void
+
+function greeting(): string {
+  const hour = new Date().getHours()
+  if (hour >= 5 && hour < 12) return 'Доброе утро'
+  if (hour >= 12 && hour < 17) return 'Добрый день'
+  if (hour >= 17 && hour < 23) return 'Добрый вечер'
+  return 'Доброй ночи'
+}
+
+function updateTask(change: Change, id: string, fields: Partial<Task>) {
+  change(data => ({
+    ...data,
+    tasks: { ...data.tasks, [id]: { ...data.tasks[id], ...fields, updatedAt: Date.now() } },
+  }))
+}
+
+function toggleTask(change: Change, task: Task) {
+  updateTask(change, task.id, { done: !task.done, doneAt: task.done ? null : Date.now() })
+}
+
+function applyTemplate(change: Change, template: Template, date: string) {
+  change(data => {
+    const tasks = { ...data.tasks }
+    for (const item of template.items) {
+      const task = makeTask({ ...item, date })
+      tasks[task.id] = task
+    }
+    return { ...data, tasks }
+  })
+}
+
+function liveTemplates(data: Data): Template[] {
+  return Object.values(data.templates).filter(t => !t.deleted).sort((a, b) => a.name.localeCompare(b.name, 'ru'))
+}
+
+/* ─────────────── День ─────────────── */
+
+function TaskCard({ task, onToggle, onOpen }: { task: Task; onToggle: () => void; onOpen: () => void }) {
+  return (
+    <div className={`task-card ${task.done ? 'task-done' : ''} ${task.important ? 'task-accent' : ''}`}>
+      <Checkbox done={task.done} onClick={onToggle} />
+      <Action className="task-content" onClick={onOpen} label={`Открыть: ${task.title}`}>
+        <div className="task-title">{task.title}</div>
+        <div className="task-meta">
+          {task.time && <span>{task.time}</span>}
+          {task.tag && <TagChip warm={task.important}>{task.tag}</TagChip>}
+          {!task.tag && task.important && <TagChip warm>важно</TagChip>}
+          {task.movedFrom && !task.done && <span className="moved">перенесено</span>}
+        </div>
+      </Action>
+      <Icon name="chevron" size="sm" />
+    </div>
+  )
+}
+
+function progressTitle(done: number, total: number): [string, string] {
+  if (total === 0) return ['Чистый лист', 'Запиши одно дело и сделай шаг.']
+  if (done === 0) return ['Начни с малого', 'Одно дело — и ты уже на 1% лучше.']
+  if (done === total) return ['День закрыт!', 'Ты стал лучше, чем вчера.']
+  if (done / total < 0.5) return ['Хорошее начало', 'Пара побед уже есть.']
+  return ['Ты растёшь', 'Осталось совсем немного.']
+}
+
+function TodayScreen({
+  data, change, date, setDate, go, name,
+}: {
+  data: Data
+  change: Change
+  date: string
+  setDate: (date: string) => void
+  go: (route: Route) => void
+  name: string | null
+}) {
+  const today = todayKey()
+  const tasks = liveTasks(data, date)
+  const done = tasks.filter(t => t.done).length
+  const [title, subtitle] = progressTitle(done, tasks.length)
+  const templates = liveTemplates(data)
+
+  return (
+    <>
+      <main className="screen today-screen">
+        <div className="top-row">
+          <div>
+            <div className="eyebrow">{formatLong(date)}</div>
+            <div className="hero-title">{date === today ? `${greeting()}${name ? `, ${name}` : ''}` : formatRelative(date)}</div>
+            <div className="subtitle">Стань лучше на 1% сегодня.</div>
+          </div>
+          <div className="avatar">{name ? name[0] : '1%'}</div>
+        </div>
+
+        <div className="day-switch">
+          <Action className="icon-action small" onClick={() => setDate(addDays(date, -1))} label="Предыдущий день">
+            <Icon name="arrow" size="sm" />
+          </Action>
+          <Action className={`day-switch-label ${date === today ? 'is-today' : ''}`} onClick={() => setDate(today)}>
+            {date === today ? 'Сегодня' : 'Вернуться к сегодня'}
+          </Action>
+          <Action className="icon-action small flip" onClick={() => setDate(addDays(date, 1))} label="Следующий день">
+            <Icon name="arrow" size="sm" />
+          </Action>
+        </div>
+
+        <section className="progress-card">
+          <div className="progress-text">
+            <TagChip>ритм дня</TagChip>
+            <div className="section-title">{title}</div>
+            <div className="muted-copy">{subtitle}</div>
+          </div>
+          <ProgressRing done={done} total={tasks.length} />
+        </section>
+
+        <div className="section-heading">
+          <div className="section-title">Твой день</div>
+          <span className="count-label">
+            {tasks.length} {plural(tasks.length, ['дело', 'дела', 'дел'])}
+          </span>
+        </div>
+
+        {tasks.length === 0 ? (
+          <div className="empty-card">
+            <div className="muted-copy">Пусто. Добавь дело кнопкой «+» или начни с шаблона:</div>
+            <div className="chip-row">
+              {templates.map(template => (
+                <Action key={template.id} className="suggestion-chip" onClick={() => applyTemplate(change, template, date)}>
+                  <Icon name="layers" size="sm" /> {template.name}
+                </Action>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className="task-list">
+            {tasks.map(task => (
+              <TaskCard
+                key={task.id}
+                task={task}
+                onToggle={() => toggleTask(change, task)}
+                onOpen={() => go({ name: 'detail', taskId: task.id })}
+              />
+            ))}
+          </div>
+        )}
+      </main>
+      <Action className="fab" onClick={() => go({ name: 'add' })} label="Добавить дело">
+        <Icon name="plus" size="lg" />
+      </Action>
+      <BottomNav tab="today" navigate={tab => go({ name: tab })} />
+    </>
+  )
+}
+
+/* ─────────────── Добавить ─────────────── */
+
+function AddScreen({
+  data, change, date, go,
+}: {
+  data: Data
+  change: Change
+  date: string
+  go: (route: Route) => void
+}) {
+  const [text, setText] = useState('')
+  const [important, setImportant] = useState(false)
+  const today = todayKey()
+  const parsed = parseQuick(text, today)
+  const target = parsed.date ?? date
+  const isImportant = important || parsed.important
+  const templates = liveTemplates(data)
+
+  const save = () => {
+    if (!parsed.title) return
+    const task = makeTask({
+      title: parsed.title,
+      date: target,
+      time: parsed.time,
+      tag: parsed.tag,
+      important: isImportant,
+    })
+    change(current => ({ ...current, tasks: { ...current.tasks, [task.id]: task } }))
+    go({ name: 'today' })
+  }
+
+  return (
+    <main className="screen add-screen">
+      <ScreenHeader eyebrow="Новая умная заметка" title="Запиши мысль" onBack={() => go({ name: 'today' })} />
+      <textarea
+        className="note-input"
+        autoFocus
+        rows={4}
+        value={text}
+        placeholder="Что нужно сделать?"
+        aria-label="Что нужно сделать?"
+        onChange={event => setText(event.target.value)}
+        onKeyDown={event => {
+          if (event.key === 'Enter' && !event.shiftKey) {
+            event.preventDefault()
+            save()
+          }
+        }}
+      />
+
+      <div className="recognition-card">
+        <div className="recognition-icon">
+          <Icon name="sparkle" size="sm" />
+        </div>
+        <div>
+          <div className="recognition-label">1% понимает тебя</div>
+          <div className="recognition-example">«завтра в 10:00 зал #спорт !»</div>
+          <div className="recognition-result">
+            <Icon name="arrow" size="sm" /> дата · время · тег · важно
+          </div>
+        </div>
+      </div>
+
+      <div className="suggestion-group">
+        <div className="group-label">Что я понял</div>
+        <div className="chip-row">
+          <span className="suggestion-chip selected">
+            <Icon name="calendar" size="sm" /> {formatChip(target, today)}
+          </span>
+          {parsed.time && (
+            <span className="suggestion-chip selected">
+              <Icon name="clock" size="sm" /> {parsed.time}
+            </span>
+          )}
+          {parsed.tag && (
+            <span className="suggestion-chip selected">
+              <Icon name="tag" size="sm" /> {parsed.tag}
+            </span>
+          )}
+          <Action
+            className={`suggestion-chip ${isImportant ? 'warm' : ''}`}
+            onClick={() => setImportant(!important)}
+            disabled={parsed.important}
+          >
+            <Icon name="flag" size="sm" /> Важно
+          </Action>
+        </div>
+      </div>
+
+      {templates.length > 0 && (
+        <div className="suggestion-group">
+          <div className="group-label">Или добавь шаблон на {formatChip(date, today).toLowerCase()}</div>
+          <div className="chip-row">
+            {templates.map(template => (
+              <Action
+                key={template.id}
+                className="suggestion-chip"
+                onClick={() => {
+                  applyTemplate(change, template, date)
+                  go({ name: 'today' })
+                }}
+              >
+                <Icon name="layers" size="sm" /> {template.name} · {template.items.length}
+              </Action>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="add-tip">
+        <Leaf small />
+        <span>Пиши как думаешь. 1% разложит всё по местам.</span>
+      </div>
+
+      <div className="bottom-actions">
+        <Action className="secondary-button" onClick={() => go({ name: 'today' })}>Отмена</Action>
+        <Action className="primary-button" onClick={save} disabled={!parsed.title}>
+          Добавить в день <Icon name="plus" size="sm" />
+        </Action>
+      </div>
+    </main>
+  )
+}
+
+/* ─────────────── Дело ─────────────── */
+
+function DetailScreen({ data, change, taskId, go }: { data: Data; change: Change; taskId: string; go: (route: Route) => void }) {
+  const task = data.tasks[taskId]
+  if (!task || task.deleted) {
+    return (
+      <main className="screen">
+        <ScreenHeader title="Дело не найдено" onBack={() => go({ name: 'today' })} />
+      </main>
+    )
+  }
+  const update = (fields: Partial<Task>) => updateTask(change, task.id, fields)
+  const today = todayKey()
+
+  return (
+    <main className="screen detail-screen">
+      <ScreenHeader eyebrow="Подробности" title={formatRelative(task.date)} onBack={() => go({ name: 'today' })} />
+      <input
+        className="detail-title"
+        value={task.title}
+        aria-label="Название"
+        onChange={event => update({ title: event.target.value })}
+      />
+      <div className="detail-tags">
+        {task.tag && <TagChip>{task.tag}</TagChip>}
+        <TagChip warm>
+          {formatChip(task.date, today)}
+          {task.time ? ` · ${task.time}` : ''}
+        </TagChip>
+        <Action className={`tag-chip toggle ${task.important ? 'tag-warm' : ''}`} onClick={() => update({ important: !task.important })}>
+          {task.important ? 'важно ✓' : 'сделать важным'}
+        </Action>
+      </div>
+
+      <section className="detail-section">
+        <div className="group-label">Время</div>
+        <input
+          className="time-input"
+          type="time"
+          value={task.time ?? ''}
+          onChange={event => update({ time: event.target.value || null })}
+        />
+      </section>
+
+      <section className="detail-section">
+        <div className="group-label">Заметки</div>
+        <textarea
+          className="notes-card"
+          rows={4}
+          placeholder="Мысли, ссылки, что получилось…"
+          value={task.note}
+          onChange={event => update({ note: event.target.value })}
+        />
+      </section>
+
+      <section className="detail-section">
+        <div className="group-label">Перенести</div>
+        <div className="chip-row">
+          {[0, 1, 2, 7].map(days => {
+            const target = addDays(today, days)
+            return (
+              <Action
+                key={days}
+                className={`suggestion-chip ${task.date === target ? 'selected' : ''}`}
+                onClick={() => update({ date: target })}
+              >
+                {days === 7 ? 'Через неделю' : formatChip(target, today)}
+              </Action>
+            )
+          })}
+        </div>
+      </section>
+
+      <section className="detail-section">
+        <div className="group-label">История</div>
+        <div className="history-card">
+          <div className="history-dot" />
+          <div>
+            <div className="recognition-label">
+              {task.done && task.doneAt
+                ? `Сделано ${new Date(task.doneAt).toLocaleString('ru-RU', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })}`
+                : `Создано ${new Date(task.createdAt).toLocaleString('ru-RU', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })}`}
+            </div>
+            {task.movedFrom && <div className="muted-copy">Перенесено с {formatChip(task.movedFrom, today).toLowerCase()}</div>}
+          </div>
+        </div>
+      </section>
+
+      <div className="bottom-actions">
+        <Action
+          className="secondary-button square"
+          label="Удалить"
+          onClick={() => {
+            update({ deleted: true })
+            go({ name: 'today' })
+          }}
+        >
+          <Icon name="trash" />
+        </Action>
+        <Action
+          className="primary-button grow"
+          onClick={() => {
+            toggleTask(change, task)
+            go({ name: 'today' })
+          }}
+        >
+          <Icon name="check" /> {task.done ? 'Вернуть в работу' : 'Готово'}
+        </Action>
+      </div>
+    </main>
+  )
+}
+
+/* ─────────────── Привычки ─────────────── */
+
+function HabitsScreen({ data, change, go }: { data: Data; change: Change; go: (route: Route) => void }) {
+  const [draft, setDraft] = useState('')
+  const [editing, setEditing] = useState(false)
+  const today = todayKey()
+  const days = Array.from({ length: 7 }, (_, i) => addDays(today, i - 6))
+  const habits = Object.values(data.habits).filter(h => !h.deleted).sort((a, b) => a.createdAt - b.createdAt)
+  const doneToday = habits.filter(h => h.log[today]).length
+
+  const setHabit = (habit: Habit, fields: Partial<Habit>) =>
+    change(current => ({
+      ...current,
+      habits: { ...current.habits, [habit.id]: { ...habit, ...fields, updatedAt: Date.now() } },
+    }))
+
+  const toggleDay = (habit: Habit, day: string) => {
+    const log = { ...habit.log }
+    if (log[day]) delete log[day]
+    else log[day] = true
+    setHabit(habit, { log })
+  }
+
+  const add = () => {
+    const title = draft.trim()
+    if (!title) return
+    const now = Date.now()
+    const habit: Habit = { id: newId(), title, log: {}, createdAt: now, updatedAt: now }
+    change(current => ({ ...current, habits: { ...current.habits, [habit.id]: habit } }))
+    setDraft('')
+  }
+
+  return (
+    <>
+      <main className="screen">
+        <ScreenHeader eyebrow={formatLong(today)} title="Привычки" />
+        <div className="timeline-summary">
+          <div className="timeline-summary-icon"><Icon name="repeat" /></div>
+          <div>
+            <div className="summary-value">
+              {habits.length === 0 ? 'Заведи первую привычку' : `${doneToday} из ${habits.length} сегодня`}
+            </div>
+            <div className="muted-copy">Маленькие шаги каждый день дают большой рост.</div>
+          </div>
+          {habits.length > 0 && (
+            <Action className="text-button" onClick={() => setEditing(!editing)}>
+              {editing ? 'Готово' : 'Изменить'}
+            </Action>
+          )}
+        </div>
+
+        <div className="habit-list">
+          {habits.map(habit => {
+            const streak = habitStreak(habit, today)
+            return (
+              <div className="habit-card" key={habit.id}>
+                <div className="habit-top">
+                  <Checkbox done={Boolean(habit.log[today])} onClick={() => toggleDay(habit, today)} />
+                  <div className="habit-text">
+                    <div className="task-title">{habit.title}</div>
+                    <div className="timeline-note">
+                      {streak > 0 ? `🔥 ${streak} ${plural(streak, ['день', 'дня', 'дней'])} подряд` : 'Начни серию сегодня'}
+                    </div>
+                  </div>
+                  {editing && (
+                    <Action className="icon-action small danger" label="Удалить привычку" onClick={() => setHabit(habit, { deleted: true })}>
+                      <Icon name="trash" size="sm" />
+                    </Action>
+                  )}
+                </div>
+                <div className="habit-days">
+                  {days.map(day => (
+                    <Action
+                      key={day}
+                      className={`habit-day ${habit.log[day] ? 'on' : ''} ${day === today ? 'today' : ''}`}
+                      onClick={() => toggleDay(habit, day)}
+                      label={formatChip(day, today)}
+                    >
+                      <span>{WEEKDAYS_SHORT[(fromKey(day).getDay() + 6) % 7]}</span>
+                      <i />
+                    </Action>
+                  ))}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+
+        <div className="add-row">
+          <input
+            className="add-input"
+            value={draft}
+            placeholder="Новая привычка, например «10 отжиманий»"
+            onChange={event => setDraft(event.target.value)}
+            onKeyDown={event => event.key === 'Enter' && add()}
+          />
+          <Action className="icon-action dark" onClick={add} label="Добавить привычку" disabled={!draft.trim()}>
+            <Icon name="plus" />
+          </Action>
+        </div>
+      </main>
+      <BottomNav tab="habits" navigate={tab => go({ name: tab })} />
+    </>
+  )
+}
+
+/* ─────────────── Неделя ─────────────── */
+
+function WeekScreen({
+  data, setDate, go,
+}: {
+  data: Data
+  setDate: (date: string) => void
+  go: (route: Route) => void
+}) {
+  const today = todayKey()
+  const [start, setStart] = useState(() => weekStart(today))
+  const days = Array.from({ length: 7 }, (_, i) => addDays(start, i))
+  const stats = days.map(day => {
+    const tasks = liveTasks(data, day)
+    const done = tasks.filter(t => t.done).length
+    return { day, total: tasks.length, done, progress: tasks.length ? Math.round((done / tasks.length) * 100) : 0 }
+  })
+  const total = stats.reduce((sum, s) => sum + s.total, 0)
+  const done = stats.reduce((sum, s) => sum + s.done, 0)
+  const percent = total ? Math.round((done / total) * 100) : 0
+  const best = stats.filter(s => s.done > 0).sort((a, b) => b.done - a.done || b.progress - a.progress)[0]
+  const streak = dayStreak(data, today)
+
+  return (
+    <>
+      <main className="screen">
+        <ScreenHeader eyebrow={formatRange(days[0], days[6])} title="Неделя роста" />
+        <div className="week-nav">
+          <Action className="icon-action small" onClick={() => setStart(addDays(start, -7))} label="Прошлая неделя">
+            <Icon name="arrow" size="sm" />
+          </Action>
+          <Action className="day-switch-label" onClick={() => setStart(weekStart(today))}>
+            {start === weekStart(today) ? 'Эта неделя' : 'К этой неделе'}
+          </Action>
+          <Action className="icon-action small flip" onClick={() => setStart(addDays(start, 7))} label="Следующая неделя">
+            <Icon name="arrow" size="sm" />
+          </Action>
+        </div>
+        <div className="week-strip">
+          {stats.map((item, index) => (
+            <Action
+              className={`day-cell ${item.day === today ? 'active' : ''}`}
+              key={item.day}
+              onClick={() => {
+                setDate(item.day)
+                go({ name: 'today' })
+              }}
+              label={formatLong(item.day)}
+            >
+              <span className="day-name">{WEEKDAYS_SHORT[index]}</span>
+              <div className="day-leaf" style={{ '--fill': `${item.progress}%` } as React.CSSProperties}>
+                <Leaf small />
+                {item.progress > 0 && <span className="leaf-fill" />}
+              </div>
+              <span className="day-date">{fromKey(item.day).getDate()}</span>
+            </Action>
+          ))}
+        </div>
+
+        <section className="week-hero">
+          <div className="week-art">
+            <div className="plant-stem" />
+            <Leaf />
+            <div className="plant-leaf-two"><Leaf small /></div>
+          </div>
+          <div className="week-hero-copy">
+            <TagChip>твоя неделя</TagChip>
+            <div className="section-title">
+              Понемногу,<br />но каждый день
+            </div>
+            <div className="muted-copy">
+              {total ? `Выполнено ${percent}% от запланированного.` : 'На эту неделю пока ничего не запланировано.'}
+            </div>
+          </div>
+        </section>
+
+        <div className="stats-grid">
+          <div className="stat-card">
+            <div className="stat-icon peach"><Icon name="repeat" /></div>
+            <div className="stat-value">
+              {streak} {plural(streak, ['день', 'дня', 'дней'])}
+            </div>
+            <div className="stat-label">Серия подряд</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-icon"><Icon name="check" /></div>
+            <div className="stat-value">{done}</div>
+            <div className="stat-label">{plural(done, ['Дело сделано', 'Дела сделано', 'Дел сделано'])}</div>
+          </div>
+        </div>
+        {best && (
+          <div className="best-day-card">
+            <div className="best-day-badge">{WEEKDAYS_SHORT[(fromKey(best.day).getDay() + 6) % 7].toUpperCase()}</div>
+            <div>
+              <div className="recognition-label">Лучший день: {formatChip(best.day, today).toLowerCase()}</div>
+              <div className="muted-copy">
+                Сделано {best.done} из {best.total}.
+              </div>
+            </div>
+            <Icon name="sparkle" />
+          </div>
+        )}
+      </main>
+      <BottomNav tab="week" navigate={tab => go({ name: tab })} />
+    </>
+  )
+}
+
+/* ─────────────── Профиль ─────────────── */
+
+const STATUS_TEXT: Record<SyncStatus, string> = {
+  local: 'Данные хранятся только на этом устройстве',
+  syncing: 'Синхронизация…',
+  synced: 'Всё сохранено в облаке',
+  offline: 'Нет сети — сохраню, когда появится',
+  error: 'Не получилось синхронизировать, попробую ещё раз',
+}
+
+function ProfileScreen({
+  data, change, date, go, store, name,
+}: {
+  data: Data
+  change: Change
+  date: string
+  go: (route: Route) => void
+  store: ReturnType<typeof useStore>
+  name: string | null
+}) {
+  const templates = liveTemplates(data)
+  const growingDays = useMemo(
+    () => new Set(Object.values(data.tasks).filter(t => !t.deleted && t.done).map(t => t.date)).size,
+    [data.tasks],
+  )
+  const dayTasks = liveTasks(data, date)
+
+  const saveDayAsTemplate = () => {
+    const templateName = window.prompt('Как назвать шаблон?', 'Мой шаблон')?.trim()
+    if (!templateName) return
+    const template: Template = {
+      id: newId(),
+      name: templateName,
+      updatedAt: Date.now(),
+      items: dayTasks.map(t => ({ title: t.title, time: t.time, tag: t.tag })),
+    }
+    change(current => ({ ...current, templates: { ...current.templates, [template.id]: template } }))
+  }
+
+  const removeTemplate = (template: Template) =>
+    change(current => ({
+      ...current,
+      templates: { ...current.templates, [template.id]: { ...template, deleted: true, updatedAt: Date.now() } },
+    }))
+
+  return (
+    <>
+      <main className="screen profile-screen">
+        <div className="profile-avatar">{name ? name[0] : '1%'}</div>
+        <div className="hero-title">{name ? `1% · ${name}` : 'Мой 1%'}</div>
+        <div className="subtitle">Каждый день немного лучше.</div>
+
+        <div className="profile-card">
+          <Leaf />
+          <div className="section-title">
+            {growingDays} {plural(growingDays, ['день', 'дня', 'дней'])} роста
+          </div>
+          <div className="muted-copy">Дни, когда ты сделал хотя бы одно дело.</div>
+        </div>
+
+        <section className="profile-section">
+          <div className="group-label">Аккаунт</div>
+          <div className="settings-card">
+            {!store.canSync ? (
+              <div className="muted-copy">
+                Вход через Google заработает после подключения базы Supabase. Пока всё хранится на этом устройстве.
+              </div>
+            ) : store.session ? (
+              <>
+                <div className="recognition-label">{store.session.user.email}</div>
+                <div className={`muted-copy status-${store.status}`}>{STATUS_TEXT[store.status]}</div>
+                <div className="chip-row">
+                  <Action className="suggestion-chip" onClick={() => void store.sync()}>
+                    <Icon name="repeat" size="sm" /> Синхронизировать
+                  </Action>
+                  <Action className="suggestion-chip" onClick={() => void store.signOut()}>Выйти</Action>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="muted-copy">Войди, чтобы дела были на всех твоих устройствах.</div>
+                <Action className="primary-button google" onClick={() => void store.signIn()}>
+                  Войти через Google
+                </Action>
+              </>
+            )}
+          </div>
+        </section>
+
+        <section className="profile-section">
+          <div className="group-label">Шаблоны</div>
+          <div className="subtask-list">
+            {templates.map(template => (
+              <div className="subtask" key={template.id}>
+                <Icon name="layers" size="sm" />
+                <span className="grow">
+                  {template.name}
+                  <small> · {template.items.length} {plural(template.items.length, ['дело', 'дела', 'дел'])}</small>
+                </span>
+                <Action className="icon-action small danger" label={`Удалить шаблон ${template.name}`} onClick={() => removeTemplate(template)}>
+                  <Icon name="trash" size="sm" />
+                </Action>
+              </div>
+            ))}
+            {templates.length === 0 && <div className="subtask muted-copy">Шаблонов пока нет.</div>}
+          </div>
+          <Action className="secondary-button wide" onClick={saveDayAsTemplate} disabled={dayTasks.length === 0}>
+            <Icon name="plus" size="sm" /> Сохранить день «{formatChip(date).toLowerCase()}» как шаблон
+          </Action>
+        </section>
+      </main>
+      <BottomNav tab="profile" navigate={tab => go({ name: tab })} />
+    </>
+  )
+}
+
+/* ─────────────── Приложение ─────────────── */
+
+export default function App() {
+  const store = useStore()
+  const { data, change } = store
+  const [route, setRoute] = useState<Route>({ name: 'today' })
+  const [date, setDate] = useState(todayKey)
+  const fullName = store.session?.user.user_metadata?.full_name as string | undefined
+  const name = fullName ? fullName.split(' ')[0] : null
+
+  const go = (next: Route) => setRoute(next)
+
+  let content
+  switch (route.name) {
+    case 'add':
+      content = <AddScreen data={data} change={change} date={date} go={go} />
+      break
+    case 'detail':
+      content = <DetailScreen data={data} change={change} taskId={route.taskId} go={go} />
+      break
+    case 'habits':
+      content = <HabitsScreen data={data} change={change} go={go} />
+      break
+    case 'week':
+      content = <WeekScreen data={data} setDate={setDate} go={go} />
+      break
+    case 'profile':
+      content = <ProfileScreen data={data} change={change} date={date} go={go} store={store} name={name} />
+      break
+    default:
+      content = <TodayScreen data={data} change={change} date={date} setDate={setDate} go={go} name={name} />
+  }
+
+  return (
+    <div className="app-shell">
+      <div className="phone-frame">{content}</div>
+    </div>
+  )
+}
