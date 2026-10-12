@@ -134,7 +134,7 @@ export function startGoogleAuth(silent: boolean) {
   try {
     sessionStorage.setItem(STATE_KEY, JSON.stringify({ state, silent }))
   } catch {
-    // без sessionStorage проверим ответ слабее — по наличию токена
+    // без sessionStorage ответ не примем: не сможем проверить, что он наш
   }
   const params = new URLSearchParams({
     client_id: GOOGLE_CLIENT_ID,
@@ -159,12 +159,17 @@ export function handleGoogleRedirect() {
   let expected: { state: string; silent: boolean } | null = null
   try {
     expected = JSON.parse(sessionStorage.getItem(STATE_KEY) ?? 'null')
-    sessionStorage.removeItem(STATE_KEY)
   } catch {
     expected = null
   }
+  // Берём только свой ответ: по state, который сами отправили. Чужой (например, вход Supabase) не трогаем.
+  if (!expected || params.get('state') !== expected.state) return
+  try {
+    sessionStorage.removeItem(STATE_KEY)
+  } catch {
+    // ничего страшного
+  }
   history.replaceState(null, '', window.location.pathname + window.location.search)
-  if (expected && params.get('state') !== expected.state) return
 
   const token = params.get('access_token')
   if (token) {

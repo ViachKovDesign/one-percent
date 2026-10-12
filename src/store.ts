@@ -6,7 +6,10 @@ import { emptyData, ensureGoalWeek, merge, normalize, rollOver, type Data } from
 const LOCAL_KEY = 'one-percent:data'
 
 export const supabase: SupabaseClient | null =
-  SUPABASE_URL && SUPABASE_ANON_KEY ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null
+  SUPABASE_URL && SUPABASE_ANON_KEY
+    ? // PKCE: Supabase возвращает ?code= в адресе, а не #access_token — не путается со входом в календарь
+      createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth: { flowType: 'pkce' } })
+    : null
 
 /** Утренняя подготовка дня: перенос невыполненного и шаги целей на неделю вперёд. */
 export function prepareDay(data: Data): Data {
