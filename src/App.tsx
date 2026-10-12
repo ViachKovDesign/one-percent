@@ -4,17 +4,20 @@ import {
   todayKey, WEEKDAYS_SHORT, weekStart,
 } from './dates'
 import {
-  dayStreak, habitStreak, liveTasks, makeTask, newId,
+  dayStreak, goalProgress, habitStreak, liveGoals, liveTasks, makeTask, newId,
   type Data, type Habit, type Task, type Template,
 } from './model'
+import { getRemindMin, setRemindMin } from './calendar'
+import { CalendarSheet } from './calendarSheet'
+import { GoalEditScreen, GoalScreen, GoalsScreen } from './goals'
+import { taskEvent, type AskCalendar, type CalendarRequest, type Change, type Route } from './nav'
 import { parseQuick } from './parse'
 import { useStore, type SyncStatus } from './store'
+import { TemplateEditScreen } from './templates'
 import {
-  Action, BottomNav, Checkbox, Icon, Leaf, ProgressRing, ScreenHeader, TagChip, type Tab,
+  Action, BottomNav, Checkbox, Icon, Leaf, ProgressBar, ProgressRing, ScreenHeader, TagChip,
 } from './ui'
 
-type Route = { name: Tab } | { name: 'add' } | { name: 'detail'; taskId: string }
-type Change = (fn: (current: Data) => Data) => void
 
 function greeting(): string {
   const hour = new Date().getHours()
@@ -79,7 +82,7 @@ function progressTitle(done: number, total: number): [string, string] {
 }
 
 function TodayScreen({
-  data, change, date, setDate, go, name,
+  data, change, date, setDate, go, name, askCalendar,
 }: {
   data: Data
   change: Change
@@ -87,12 +90,15 @@ function TodayScreen({
   setDate: (date: string) => void
   go: (route: Route) => void
   name: string | null
+  askCalendar: AskCalendar
 }) {
   const today = todayKey()
   const tasks = liveTasks(data, date)
   const done = tasks.filter(t => t.done).length
   const [title, subtitle] = progressTitle(done, tasks.length)
   const templates = liveTemplates(data)
+  const goals = liveGoals(data)
+  const open = tasks.filter(t => !t.done)
 
   return (
     <>
@@ -127,25 +133,44 @@ function TodayScreen({
           <ProgressRing done={done} total={tasks.length} />
         </section>
 
+        {goals.length > 0 && (
+          <div className="goal-strip">
+            {goals.map(goal => {
+              const p = goalProgress(data, goal, today)
+              return (
+                <Action key={goal.id} className="goal-pill" onClick={() => go({ name: 'goal', goalId: goal.id })}>
+                  <span className="goal-pill-title">{goal.title}</span>
+                  <ProgressBar percent={p.percent} />
+                  <span className="goal-pill-percent">{p.percent}%</span>
+                </Action>
+              )
+            })}
+          </div>
+        )}
+
         <div className="section-heading">
           <div className="section-title">Твой день</div>
-          <span className="count-label">
-            {tasks.length} {plural(tasks.length, ['дело', 'дела', 'дел'])}
-          </span>
+          {open.length > 0 ? (
+            <Action
+              className="text-button with-icon"
+              onClick={() =>
+                askCalendar({
+                  title: `${formatRelative(date)}: ${open.length} ${plural(open.length, ['дело', 'дела', 'дел'])}`,
+                  fileName: `den-${date}`,
+                  events: open.map(taskEvent),
+                })
+              }
+            >
+              <Icon name="calendar" size="sm" /> В календарь
+            </Action>
+          ) : (
+            <span className="count-label">
+              {tasks.length} {plural(tasks.length, ['дело', 'дела', 'дел'])}
+            </span>
+          )}
         </div>
 
-        {tasks.length === 0 ? (
-          <div className="empty-card">
-            <div className="muted-copy">Пусто. Добавь дело кнопкой «+» или начни с шаблона:</div>
-            <div className="chip-row">
-              {templates.map(template => (
-                <Action key={template.id} className="suggestion-chip" onClick={() => applyTemplate(change, template, date)}>
-                  <Icon name="layers" size="sm" /> {template.name}
-                </Action>
-              ))}
-            </div>
-          </div>
-        ) : (
+        {tasks.length > 0 && (
           <div className="task-list">
             {tasks.map(task => (
               <TaskCard
@@ -155,6 +180,20 @@ function TodayScreen({
                 onOpen={() => go({ name: 'detail', taskId: task.id })}
               />
             ))}
+          </div>
+        )}
+        {tasks.every(task => task.goalId) && (
+          <div className="empty-card">
+            <div className="muted-copy">
+              {tasks.length === 0 ? 'Пусто.' : 'Своих дел пока нет.'} Добавь дело кнопкой «+» или начни с шаблона:
+            </div>
+            <div className="chip-row">
+              {templates.map(template => (
+                <Action key={template.id} className="suggestion-chip" onClick={() => applyTemplate(change, template, date)}>
+                  <Icon name="layers" size="sm" /> {template.name}
+                </Action>
+              ))}
+            </div>
           </div>
         )}
       </main>
@@ -292,7 +331,15 @@ function AddScreen({
 
 /* ─────────────── Дело ─────────────── */
 
-function DetailScreen({ data, change, taskId, go }: { data: Data; change: Change; taskId: string; go: (route: Route) => void }) {
+function DetailScreen({
+  data, change, taskId, go, askCalendar,
+}: {
+  data: Data
+  change: Change
+  taskId: string
+  go: (route: Route) => void
+  askCalendar: AskCalendar
+}) {
   const task = data.tasks[taskId]
   if (!task || task.deleted) {
     return (
@@ -343,6 +390,25 @@ function DetailScreen({ data, change, taskId, go }: { data: Data; change: Change
           value={task.note}
           onChange={event => update({ note: event.target.value })}
         />
+      </section>
+
+      <section className="detail-section">
+        <div className="group-label">Напоминание</div>
+        <Action
+          className="calendar-card"
+          onClick={() => askCalendar({ title: task.title, fileName: 'delo', events: [taskEvent(task)] })}
+        >
+          <div className="stat-icon peach"><Icon name="calendar" /></div>
+          <div className="grow">
+            <div className="recognition-label">Добавить в календарь</div>
+            <div className="muted-copy">
+              {task.time
+                ? `${formatChip(task.date, today)}, ${task.time} · напомню за ${getRemindMin()} мин`
+                : 'Без времени — напомню в 9:00. Поставь время выше, чтобы точнее.'}
+            </div>
+          </div>
+          <Icon name="chevron" size="sm" />
+        </Action>
       </section>
 
       <section className="detail-section">
@@ -654,13 +720,10 @@ function ProfileScreen({
       items: dayTasks.map(t => ({ title: t.title, time: t.time, tag: t.tag })),
     }
     change(current => ({ ...current, templates: { ...current.templates, [template.id]: template } }))
+    go({ name: 'template', templateId: template.id })
   }
 
-  const removeTemplate = (template: Template) =>
-    change(current => ({
-      ...current,
-      templates: { ...current.templates, [template.id]: { ...template, deleted: true, updatedAt: Date.now() } },
-    }))
+  const [remind, setRemind] = useState(getRemindMin)
 
   return (
     <>
@@ -710,22 +773,51 @@ function ProfileScreen({
           <div className="group-label">Шаблоны</div>
           <div className="subtask-list">
             {templates.map(template => (
-              <div className="subtask" key={template.id}>
+              <Action
+                className="subtask"
+                key={template.id}
+                onClick={() => go({ name: 'template', templateId: template.id })}
+                label={`Изменить шаблон ${template.name}`}
+              >
                 <Icon name="layers" size="sm" />
                 <span className="grow">
                   {template.name}
                   <small> · {template.items.length} {plural(template.items.length, ['дело', 'дела', 'дел'])}</small>
                 </span>
-                <Action className="icon-action small danger" label={`Удалить шаблон ${template.name}`} onClick={() => removeTemplate(template)}>
-                  <Icon name="trash" size="sm" />
-                </Action>
-              </div>
+                <Icon name="chevron" size="sm" />
+              </Action>
             ))}
             {templates.length === 0 && <div className="subtask muted-copy">Шаблонов пока нет.</div>}
           </div>
-          <Action className="secondary-button wide" onClick={saveDayAsTemplate} disabled={dayTasks.length === 0}>
-            <Icon name="plus" size="sm" /> Сохранить день «{formatChip(date).toLowerCase()}» как шаблон
-          </Action>
+          <div className="button-pair">
+            <Action className="secondary-button" onClick={() => go({ name: 'template' })}>
+              <Icon name="plus" size="sm" /> Новый шаблон
+            </Action>
+            <Action className="secondary-button" onClick={saveDayAsTemplate} disabled={dayTasks.length === 0}>
+              <Icon name="layers" size="sm" /> Из дня «{formatChip(date).toLowerCase()}»
+            </Action>
+          </div>
+        </section>
+
+        <section className="profile-section">
+          <div className="group-label">Напоминания в календаре</div>
+          <div className="settings-card">
+            <div className="muted-copy">За сколько минут до дела напоминать:</div>
+            <div className="chip-row">
+              {[5, 10, 15, 30, 60].map(minutes => (
+                <Action
+                  key={minutes}
+                  className={`suggestion-chip ${remind === minutes ? 'selected' : ''}`}
+                  onClick={() => {
+                    setRemindMin(minutes)
+                    setRemind(minutes)
+                  }}
+                >
+                  {minutes === 60 ? '1 час' : `${minutes} мин`}
+                </Action>
+              ))}
+            </div>
+          </div>
         </section>
       </main>
       <BottomNav tab="profile" navigate={tab => go({ name: tab })} />
@@ -743,6 +835,8 @@ export default function App() {
   const fullName = store.session?.user.user_metadata?.full_name as string | undefined
   const name = fullName ? fullName.split(' ')[0] : null
 
+  const [calendar, setCalendar] = useState<CalendarRequest | null>(null)
+
   const go = (next: Route) => setRoute(next)
 
   let content
@@ -751,7 +845,19 @@ export default function App() {
       content = <AddScreen data={data} change={change} date={date} go={go} />
       break
     case 'detail':
-      content = <DetailScreen data={data} change={change} taskId={route.taskId} go={go} />
+      content = <DetailScreen data={data} change={change} taskId={route.taskId} go={go} askCalendar={setCalendar} />
+      break
+    case 'goals':
+      content = <GoalsScreen data={data} go={go} />
+      break
+    case 'goal':
+      content = <GoalScreen data={data} change={change} goalId={route.goalId} go={go} askCalendar={setCalendar} />
+      break
+    case 'goal-edit':
+      content = <GoalEditScreen key={route.goalId ?? 'new'} data={data} change={change} goalId={route.goalId} go={go} />
+      break
+    case 'template':
+      content = <TemplateEditScreen key={route.templateId ?? 'new'} data={data} change={change} templateId={route.templateId} go={go} />
       break
     case 'habits':
       content = <HabitsScreen data={data} change={change} go={go} />
@@ -763,12 +869,15 @@ export default function App() {
       content = <ProfileScreen data={data} change={change} date={date} go={go} store={store} name={name} />
       break
     default:
-      content = <TodayScreen data={data} change={change} date={date} setDate={setDate} go={go} name={name} />
+      content = <TodayScreen data={data} change={change} date={date} setDate={setDate} go={go} name={name} askCalendar={setCalendar} />
   }
 
   return (
     <div className="app-shell">
-      <div className="phone-frame">{content}</div>
+      <div className="phone-frame">
+        {content}
+        {calendar && <CalendarSheet request={calendar} onClose={() => setCalendar(null)} />}
+      </div>
     </div>
   )
 }

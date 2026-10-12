@@ -119,6 +119,32 @@ export function ProgressRing({ done, total }: { done: number; total: number }) {
   )
 }
 
+export function PercentRing({ percent, label }: { percent: number; label: string }) {
+  return (
+    <div className="progress-wrap">
+      <svg className="progress-ring" viewBox="0 0 120 120" aria-label={`${percent}%`}>
+        <circle className="ring-track" cx="60" cy="60" r="51" />
+        <circle className="ring-value" cx="60" cy="60" r="51" pathLength="100" strokeDasharray={`${percent} 100`} />
+      </svg>
+      <div className="progress-copy">
+        <strong>{percent}%</strong>
+        <span>{label}</span>
+      </div>
+      <div className="growing-leaf">
+        <Leaf small />
+      </div>
+    </div>
+  )
+}
+
+export function ProgressBar({ percent }: { percent: number }) {
+  return (
+    <div className="progress-bar" role="progressbar" aria-valuenow={percent} aria-valuemin={0} aria-valuemax={100}>
+      <span style={{ width: `${percent}%` }} />
+    </div>
+  )
+}
+
 export function ScreenHeader({ eyebrow, title, onBack }: { eyebrow?: string; title: string; onBack?: () => void }) {
   return (
     <div className="screen-header">
@@ -135,10 +161,11 @@ export function ScreenHeader({ eyebrow, title, onBack }: { eyebrow?: string; tit
   )
 }
 
-export type Tab = 'today' | 'habits' | 'week' | 'profile'
+export type Tab = 'today' | 'goals' | 'habits' | 'week' | 'profile'
 
 const navItems: { id: Tab; label: string; icon: IconName }[] = [
   { id: 'today', label: 'День', icon: 'sun' },
+  { id: 'goals', label: 'Цели', icon: 'flag' },
   { id: 'habits', label: 'Привычки', icon: 'repeat' },
   { id: 'week', label: 'Неделя', icon: 'calendar' },
   { id: 'profile', label: 'Профиль', icon: 'user' },

@@ -1,4 +1,4 @@
-import { addDays, todayKey } from './dates'
+import { addDays, fromKey, todayKey } from './dates'
 
 export type Task = {
   id: string
@@ -12,6 +12,8 @@ export type Task = {
   note: string
   /** День, с которого дело перенесли, если его не успели сделать. */
   movedFrom: string | null
+  /** Если дело — ежедневный шаг цели, здесь id цели. */
+  goalId?: string
   createdAt: number
   updatedAt: number
   deleted?: boolean
@@ -37,10 +39,30 @@ export type Template = {
   deleted?: boolean
 }
 
+export type Milestone = { id: string; title: string; done: boolean }
+
+export type Goal = {
+  id: string
+  title: string
+  /** Ежедневный шаг, например «Урок Tilda 30 минут». */
+  step: string
+  /** Время шага «19:00» или null. */
+  time: string | null
+  /** Дни недели для шага: 0 — воскресенье … 6 — суббота. */
+  weekdays: number[]
+  start: string
+  deadline: string
+  milestones: Milestone[]
+  createdAt: number
+  updatedAt: number
+  deleted?: boolean
+}
+
 export type Data = {
   tasks: Record<string, Task>
   habits: Record<string, Habit>
   templates: Record<string, Template>
+  goals: Record<string, Goal>
 }
 
 type Item = { updatedAt: number }
@@ -66,6 +88,17 @@ export function merge(a: Data, b: Data): Data {
     tasks: pick(a.tasks, b.tasks),
     habits: pick(a.habits, b.habits),
     templates: pick(a.templates, b.templates),
+    goals: pick(a.goals ?? {}, b.goals ?? {}),
+  }
+}
+
+/** Данные, сохранённые старой версией приложения, дополняем новыми разделами. */
+export function normalize(data: Partial<Data>): Data {
+  return {
+    tasks: data.tasks ?? {},
+    habits: data.habits ?? {},
+    templates: data.templates ?? {},
+    goals: data.goals ?? {},
   }
 }
 
@@ -74,7 +107,8 @@ export function rollOver(data: Data, today = todayKey()): Data {
   let changed = false
   const tasks = { ...data.tasks }
   for (const task of Object.values(tasks)) {
-    if (!task.deleted && !task.done && task.date < today) {
+    // Шаги целей не переносим: пропущенный день — это пропуск, а не долг.
+    if (!task.deleted && !task.done && !task.goalId && task.date < today) {
       tasks[task.id] = { ...task, date: today, movedFrom: task.movedFrom ?? task.date, updatedAt: Date.now() }
       changed = true
     }
@@ -172,5 +206,91 @@ export function emptyData(): Data {
     tasks: {},
     habits: Object.fromEntries(habits.map(h => [h.id, h])),
     templates: Object.fromEntries(templates.map(t => [t.id, t])),
+    goals: {},
+  }
+}
+
+/* ─────────────── Цели ─────────────── */
+
+export function liveGoals(data: Data): Goal[] {
+  return Object.values(data.goals).filter(g => !g.deleted).sort((a, b) => a.deadline.localeCompare(b.deadline))
+}
+
+export function isStepDay(goal: Goal, date: string): boolean {
+  return date >= goal.start && date <= goal.deadline && goal.weekdays.includes(fromKey(date).getDay())
+}
+
+/** Сколько дней с шагом между двумя датами включительно. */
+export function countStepDays(goal: Goal, from: string, to: string): number {
+  let count = 0
+  for (let day = from; day <= to; day = addDays(day, 1)) {
+    if (isStepDay(goal, day)) count += 1
+  }
+  return count
+}
+
+/** У шага цели на конкретный день постоянный id — так он не задвоится на двух устройствах. */
+export function goalTaskId(goalId: string, date: string): string {
+  return `goal-${goalId}-${date}`
+}
+
+/**
+ * Кладёт в день шаги активных целей. Если шаг уже есть (или его удалили вручную) — не трогаем,
+ * но обновляем название и время у невыполненного, если цель отредактировали.
+ */
+export function ensureGoalTasks(data: Data, date = todayKey()): Data {
+  let tasks: Record<string, Task> | null = null
+  for (const goal of liveGoals(data)) {
+    if (!isStepDay(goal, date)) continue
+    const id = goalTaskId(goal.id, date)
+    const existing = data.tasks[id]
+    if (!existing) {
+      tasks ??= { ...data.tasks }
+      tasks[id] = { ...makeTask({ title: goal.step, date, time: goal.time, tag: 'цель', goalId: goal.id }), id }
+    } else if (!existing.deleted && !existing.done && (existing.title !== goal.step || existing.time !== goal.time)) {
+      tasks ??= { ...data.tasks }
+      tasks[id] = { ...existing, title: goal.step, time: goal.time, updatedAt: Date.now() }
+    }
+  }
+  return tasks ? { ...data, tasks } : data
+}
+
+export type GoalProgress = {
+  /** Сделано шагов. */
+  done: number
+  /** Всего шагов по плану от старта до дедлайна. */
+  planned: number
+  /** Процент выполнения цели, 0–100. */
+  percent: number
+  /** Сколько шагов должно быть сделано к сегодняшнему дню. */
+  expected: number
+  /** Сделано минус ожидаемое: плюс — опережаешь, минус — отстаёшь. */
+  pace: number
+  daysLeft: number
+  isFinished: boolean
+}
+
+export function goalProgress(data: Data, goal: Goal, today = todayKey()): GoalProgress {
+  const doneDays = new Set(
+    Object.values(data.tasks)
+      .filter(t => t.goalId === goal.id && t.done && !t.deleted)
+      .map(t => t.date),
+  )
+  const done = doneDays.size
+  const planned = Math.max(1, countStepDays(goal, goal.start, goal.deadline))
+  // Сегодняшний шаг идёт в план, только если он уже сделан: день ещё не закончился.
+  const end = today > goal.deadline ? goal.deadline : addDays(today, -1)
+  let expected = end >= goal.start ? countStepDays(goal, goal.start, end) : 0
+  if (today <= goal.deadline && doneDays.has(today)) expected += 1
+  const msPerDay = 24 * 60 * 60 * 1000
+  const daysLeft = Math.max(0, Math.round((fromKey(goal.deadline).getTime() - fromKey(today).getTime()) / msPerDay))
+  return {
+    done,
+    planned,
+    percent: Math.min(100, Math.round((done / planned) * 100)),
+    expected,
+    pace: done - expected,
+    daysLeft,
+    isFinished: today > goal.deadline,
   }
 }

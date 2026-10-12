@@ -1,19 +1,24 @@
 import { createClient, type Session, type SupabaseClient } from '@supabase/supabase-js'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { SUPABASE_ANON_KEY, SUPABASE_URL } from './config'
-import { emptyData, merge, rollOver, type Data } from './model'
+import { emptyData, ensureGoalTasks, merge, normalize, rollOver, type Data } from './model'
 
 const LOCAL_KEY = 'one-percent:data'
 
 export const supabase: SupabaseClient | null =
   SUPABASE_URL && SUPABASE_ANON_KEY ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null
 
+/** Утренняя подготовка дня: перенос невыполненного и шаги целей на сегодня. */
+function prepareDay(data: Data): Data {
+  return ensureGoalTasks(rollOver(data))
+}
+
 export type SyncStatus = 'local' | 'syncing' | 'synced' | 'offline' | 'error'
 
 function loadLocal(): Data {
   try {
     const raw = localStorage.getItem(LOCAL_KEY)
-    if (raw) return JSON.parse(raw) as Data
+    if (raw) return normalize(JSON.parse(raw) as Partial<Data>)
   } catch {
     // повреждённые или недоступные данные — начинаем с чистого листа
   }
@@ -31,7 +36,7 @@ function saveLocal(data: Data) {
 async function pullRemote(client: SupabaseClient, userId: string): Promise<Data | null> {
   const { data, error } = await client.from('user_data').select('data').eq('user_id', userId).maybeSingle()
   if (error) throw error
-  return (data?.data as Data | undefined) ?? null
+  return data?.data ? normalize(data.data as Partial<Data>) : null
 }
 
 async function pushRemote(client: SupabaseClient, userId: string, data: Data) {
@@ -42,7 +47,7 @@ async function pushRemote(client: SupabaseClient, userId: string, data: Data) {
 }
 
 export function useStore() {
-  const [data, setData] = useState<Data>(() => rollOver(loadLocal()))
+  const [data, setData] = useState<Data>(() => prepareDay(loadLocal()))
   const [session, setSession] = useState<Session | null>(null)
   const [status, setStatus] = useState<SyncStatus>('local')
   const dataRef = useRef(data)
@@ -62,7 +67,7 @@ export function useStore() {
     setStatus('syncing')
     try {
       const remote = await pullRemote(supabase, userId)
-      const merged = rollOver(remote ? merge(dataRef.current, remote) : dataRef.current)
+      const merged = prepareDay(remote ? merge(dataRef.current, remote) : dataRef.current)
       await pushRemote(supabase, userId, merged)
       // Пока шёл запрос, могли появиться новые правки: доклеиваем их сверху.
       const latest = merge(merged, dataRef.current)
@@ -85,6 +90,27 @@ export function useStore() {
     return () => sub.subscription.unsubscribe()
   }, [])
 
+  // Новый день: при возвращении в приложение переносим дела и кладём шаги целей
+  useEffect(() => {
+    const onWake = () => {
+      if (document.visibilityState !== 'visible') return
+      setData(current => {
+        const next = prepareDay(current)
+        if (next !== current) {
+          dataRef.current = next
+          saveLocal(next)
+        }
+        return next
+      })
+    }
+    window.addEventListener('focus', onWake)
+    document.addEventListener('visibilitychange', onWake)
+    return () => {
+      window.removeEventListener('focus', onWake)
+      document.removeEventListener('visibilitychange', onWake)
+    }
+  }, [])
+
   // Синхронизация при входе, при возвращении в приложение и при появлении сети
   useEffect(() => {
     if (!session) {
@@ -92,18 +118,14 @@ export function useStore() {
       return
     }
     void sync()
-    const onWake = () => {
-      setData(current => rollOver(current))
-      void sync()
-    }
-    const onVisible = () => document.visibilityState === 'visible' && onWake()
+    const onWake = () => document.visibilityState === 'visible' && void sync()
     window.addEventListener('online', onWake)
     window.addEventListener('focus', onWake)
-    document.addEventListener('visibilitychange', onVisible)
+    document.addEventListener('visibilitychange', onWake)
     return () => {
       window.removeEventListener('online', onWake)
       window.removeEventListener('focus', onWake)
-      document.removeEventListener('visibilitychange', onVisible)
+      document.removeEventListener('visibilitychange', onWake)
     }
   }, [session, sync])
 

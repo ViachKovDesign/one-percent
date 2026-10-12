@@ -76,3 +76,10 @@ export function plural(n: number, forms: [string, string, string]): string {
   if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return forms[1]
   return forms[2]
 }
+
+/** «12 марта» или «12 марта 2027», если год не текущий. */
+export function formatDayMonth(key: string, today = todayKey()): string {
+  const date = fromKey(key)
+  const year = date.getFullYear() !== fromKey(today).getFullYear() ? ` ${date.getFullYear()}` : ''
+  return `${date.getDate()} ${MONTHS_GEN[date.getMonth()]}${year}`
+}

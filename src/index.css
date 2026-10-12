@@ -471,6 +471,10 @@ textarea:focus-visible {
   border-radius: var(--radius-lg);
 }
 
+.task-list + .empty-card {
+  margin-top: 10px;
+}
+
 .empty-card .chip-row {
   margin-top: 12px;
 }
@@ -497,9 +501,10 @@ textarea:focus-visible {
   left: 0;
   z-index: 7;
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
+  gap: 2px;
   height: calc(78px + var(--safe-bottom));
-  padding: 9px 13px calc(11px + var(--safe-bottom));
+  padding: 9px 8px calc(11px + var(--safe-bottom));
   border-top: 1px solid rgba(168, 197, 160, 0.28);
   background: rgba(255, 255, 255, 0.95);
   backdrop-filter: blur(16px);
@@ -1222,6 +1227,352 @@ textarea:focus-visible {
 .status-error,
 .status-offline {
   color: var(--danger);
+}
+
+/* Цели */
+.progress-bar {
+  height: 6px;
+  overflow: hidden;
+  border-radius: var(--radius-pill);
+  background: var(--mint);
+}
+
+.progress-bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--sage-dark);
+  transition: width 350ms ease;
+}
+
+.goal-strip {
+  display: flex;
+  gap: 8px;
+  margin: -12px -20px 22px;
+  padding: 2px 20px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.goal-strip::-webkit-scrollbar {
+  display: none;
+}
+
+.goal-pill {
+  display: grid;
+  flex: 0 0 auto;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 6px 10px;
+  min-width: 150px;
+  max-width: 220px;
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  background: var(--white);
+  box-shadow: 0 5px 18px rgba(47, 74, 58, 0.055);
+}
+
+.goal-pill .progress-bar {
+  grid-column: 1 / -1;
+  grid-row: 2;
+}
+
+.goal-pill-title {
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.goal-pill-percent {
+  color: var(--sage-dark);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.goal-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.goal-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  padding: 16px;
+  border-radius: var(--radius-lg);
+  background: var(--white);
+  box-shadow: 0 5px 18px rgba(47, 74, 58, 0.055);
+}
+
+.goal-card-top,
+.goal-card-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.goal-card-text {
+  min-width: 0;
+}
+
+.goal-card-bottom {
+  color: var(--forest-soft);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.goal-card-bottom .tag-chip {
+  padding: 3px 8px;
+  font-size: 8px;
+}
+
+.goal-percent {
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.pace-behind {
+  color: var(--danger);
+}
+
+.goal-empty {
+  margin-top: 0;
+}
+
+.calendar-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 14px;
+  border-radius: var(--radius-lg);
+  background: var(--white);
+  box-shadow: 0 5px 18px rgba(47, 74, 58, 0.05);
+}
+
+.calendar-card .grow {
+  flex: 1;
+}
+
+.calendar-card .stat-icon {
+  flex: 0 0 auto;
+}
+
+.calendar-card > .icon {
+  color: var(--sage);
+}
+
+.text-button.with-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+/* Формы */
+.form-section {
+  margin-top: 22px;
+}
+
+.form-section:first-of-type {
+  margin-top: 0;
+}
+
+.form-section .group-label {
+  display: block;
+}
+
+.form-hint {
+  margin-top: 8px;
+  color: var(--forest-soft);
+  font-size: 12px;
+}
+
+.add-input.big {
+  width: 100%;
+  min-height: 52px;
+  border-radius: var(--radius-md);
+  font-size: 15px;
+}
+
+.date-input {
+  display: block;
+  margin-top: 10px;
+}
+
+.weekday-row {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+}
+
+.weekday {
+  height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--white);
+  color: var(--forest-soft);
+  font-size: 12px;
+  font-weight: 800;
+  text-align: center;
+}
+
+.weekday.on {
+  border-color: var(--sage-dark);
+  background: var(--sage-dark);
+  color: var(--white);
+}
+
+.template-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.template-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px;
+  border-radius: var(--radius-md);
+  background: var(--white);
+  box-shadow: 0 5px 18px rgba(47, 74, 58, 0.05);
+}
+
+.row-time {
+  width: 104px;
+  flex: 0 0 auto;
+  padding: 8px 6px;
+  border: 0;
+  border-radius: 10px;
+  outline: none;
+  background: var(--pistachio);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.row-fields {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.row-title,
+.row-tag {
+  width: 100%;
+  padding: 2px 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+}
+
+.row-title {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.row-tag {
+  color: var(--sage-dark);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.row-title::placeholder,
+.row-tag::placeholder {
+  color: #9aab9e;
+}
+
+.button-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.button-pair .secondary-button {
+  padding: 0 10px;
+  font-size: 12px;
+  text-align: center;
+}
+
+button.subtask {
+  width: 100%;
+  border-bottom: 1px solid var(--pistachio);
+  text-align: left;
+}
+
+button.subtask > .icon:last-child {
+  color: var(--sage);
+}
+
+/* Окно «В календарь» */
+.sheet-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: flex-end;
+  background: rgba(47, 74, 58, 0.28);
+  animation: fade-in 160ms ease;
+}
+
+.sheet {
+  width: 100%;
+  padding: 10px 20px calc(22px + var(--safe-bottom));
+  border-radius: 26px 26px 0 0;
+  background: var(--pistachio);
+  box-shadow: 0 -10px 40px rgba(47, 74, 58, 0.18);
+  animation: slide-up 220ms ease;
+}
+
+.sheet-handle {
+  width: 40px;
+  height: 5px;
+  margin: 0 auto 16px;
+  border-radius: var(--radius-pill);
+  background: var(--line);
+}
+
+.sheet-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.sheet-button {
+  width: 100%;
+  margin-top: 10px;
+}
+
+.sheet-note {
+  margin-top: 14px;
+  color: var(--forest-soft);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.sheet-cancel {
+  display: block;
+  width: 100%;
+  margin-top: 14px;
+  padding: 8px;
+  text-align: center;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+}
+
+@keyframes slide-up {
+  from { transform: translateY(100%); }
 }
 
 @media (max-height: 750px) {
