@@ -123,33 +123,33 @@ export function GoalScreen({
   const todayTask = data.tasks[goalTaskId(goal.id, today)]
   const milestonesDone = goal.milestones.filter(m => m.done).length
 
-  const setGoal = (fields: Partial<Goal>) =>
-    change(current => ({
-      ...current,
-      goals: { ...current.goals, [goal.id]: { ...current.goals[goal.id], ...fields, updatedAt: Date.now() } },
-    }))
+  // Меняем всегда свежую версию цели: быстрые нажатия подряд не теряются
+  const setGoal = (fn: (fresh: Goal) => Partial<Goal>) =>
+    change(current => {
+      const fresh = current.goals[goal.id]
+      return { ...current, goals: { ...current.goals, [goal.id]: { ...fresh, ...fn(fresh), updatedAt: Date.now() } } }
+    })
 
   const toggleToday = () => {
     if (!todayTask) return
-    change(current => ({
-      ...current,
-      tasks: {
-        ...current.tasks,
-        [todayTask.id]: {
-          ...todayTask,
-          done: !todayTask.done,
-          doneAt: todayTask.done ? null : Date.now(),
-          deleted: false,
-          updatedAt: Date.now(),
+    change(current => {
+      const fresh = current.tasks[todayTask.id]
+      // Удалённый вручную шаг считается невыполненным — отметка возвращает его в день
+      const wasDone = fresh.done && !fresh.deleted
+      return {
+        ...current,
+        tasks: {
+          ...current.tasks,
+          [fresh.id]: { ...fresh, done: !wasDone, doneAt: wasDone ? null : Date.now(), deleted: false, updatedAt: Date.now() },
         },
-      },
-    }))
+      }
+    })
   }
 
   const addMilestone = () => {
     const title = draft.trim()
     if (!title) return
-    setGoal({ milestones: [...goal.milestones, { id: newId(), title, done: false }] })
+    setGoal(fresh => ({ milestones: [...fresh.milestones, { id: newId(), title, done: false }] }))
     setDraft('')
   }
 
@@ -213,14 +213,14 @@ export function GoalScreen({
               <Checkbox
                 done={milestone.done}
                 onClick={() =>
-                  setGoal({ milestones: goal.milestones.map(m => (m.id === milestone.id ? { ...m, done: !m.done } : m)) })
+                  setGoal(fresh => ({ milestones: fresh.milestones.map(m => (m.id === milestone.id ? { ...m, done: !m.done } : m)) }))
                 }
               />
               <span className="grow">{milestone.title}</span>
               <Action
                 className="icon-action small danger"
                 label={`Удалить этап ${milestone.title}`}
-                onClick={() => setGoal({ milestones: goal.milestones.filter(m => m.id !== milestone.id) })}
+                onClick={() => setGoal(fresh => ({ milestones: fresh.milestones.filter(m => m.id !== milestone.id) }))}
               >
                 <Icon name="close" size="sm" />
               </Action>

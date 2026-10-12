@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   addDays, formatChip, formatLong, formatRange, formatRelative, fromKey, plural,
   todayKey, WEEKDAYS_SHORT, weekStart,
@@ -12,12 +12,16 @@ import { getRemindMin, setRemindMin, useCalendarSync, type CalendarSync } from '
 import { GoalEditScreen, GoalScreen, GoalsScreen } from './goals'
 import type { Change, Route } from './nav'
 import { parseQuick } from './parse'
+import { DateChips, TimeChips } from './pickers'
 import { useStore, type SyncStatus } from './store'
 import { TemplateEditScreen } from './templates'
 import {
   Action, BottomNav, Checkbox, Icon, Leaf, ProgressBar, ProgressRing, ScreenHeader, TagChip,
 } from './ui'
 
+
+type Toast = { id: number; text: string; action?: { label: string; run: () => void } }
+type Notify = (text: string, action?: Toast['action']) => void
 
 function greeting(): string {
   const hour = new Date().getHours()
@@ -35,7 +39,17 @@ function updateTask(change: Change, id: string, fields: Partial<Task>) {
 }
 
 function toggleTask(change: Change, task: Task) {
-  updateTask(change, task.id, { done: !task.done, doneAt: task.done ? null : Date.now() })
+  // Берём свежую версию: два быстрых нажатия подряд дают «отметил — снял», а не одно и то же дважды
+  change(data => {
+    const fresh = data.tasks[task.id] ?? task
+    return {
+      ...data,
+      tasks: {
+        ...data.tasks,
+        [task.id]: { ...fresh, done: !fresh.done, doneAt: fresh.done ? null : Date.now(), updatedAt: Date.now() },
+      },
+    }
+  })
 }
 
 function applyTemplate(change: Change, template: Template, date: string) {
@@ -193,18 +207,23 @@ function TodayScreen({
 /* ─────────────── Добавить ─────────────── */
 
 function AddScreen({
-  data, change, date, go,
+  data, change, date, go, notify,
 }: {
   data: Data
   change: Change
   date: string
   go: (route: Route) => void
+  notify: Notify
 }) {
   const [text, setText] = useState('')
   const [important, setImportant] = useState(false)
+  // Выбор на плашках главнее того, что понято из текста
+  const [pickedDate, setPickedDate] = useState<string | null>(null)
+  const [pickedTime, setPickedTime] = useState<string | null | undefined>(undefined)
   const today = todayKey()
   const parsed = parseQuick(text, today)
-  const target = parsed.date ?? date
+  const target = pickedDate ?? parsed.date ?? date
+  const time = pickedTime !== undefined ? pickedTime : parsed.time
   const isImportant = important || parsed.important
   const templates = liveTemplates(data)
 
@@ -213,11 +232,12 @@ function AddScreen({
     const task = makeTask({
       title: parsed.title,
       date: target,
-      time: parsed.time,
+      time,
       tag: parsed.tag,
       important: isImportant,
     })
     change(current => ({ ...current, tasks: { ...current.tasks, [task.id]: task } }))
+    if (target !== date) notify(`Добавлено: ${formatRelative(target).toLowerCase()}${time ? `, ${time}` : ''}`)
     go({ name: 'today' })
   }
 
@@ -254,16 +274,18 @@ function AddScreen({
       </div>
 
       <div className="suggestion-group">
-        <div className="group-label">Что я понял</div>
+        <div className="group-label">Дата</div>
+        <DateChips value={target} onChange={setPickedDate} />
+      </div>
+
+      <div className="suggestion-group compact">
+        <div className="group-label">Время</div>
+        <TimeChips value={time} onChange={setPickedTime} />
+      </div>
+
+      <div className="suggestion-group compact">
+        <div className="group-label">Метки</div>
         <div className="chip-row">
-          <span className="suggestion-chip selected">
-            <Icon name="calendar" size="sm" /> {formatChip(target, today)}
-          </span>
-          {parsed.time && (
-            <span className="suggestion-chip selected">
-              <Icon name="clock" size="sm" /> {parsed.time}
-            </span>
-          )}
           {parsed.tag && (
             <span className="suggestion-chip selected">
               <Icon name="tag" size="sm" /> {parsed.tag}
@@ -276,19 +298,20 @@ function AddScreen({
           >
             <Icon name="flag" size="sm" /> Важно
           </Action>
+          {!parsed.tag && <span className="chip-hint">тег — через #, например #спорт</span>}
         </div>
       </div>
 
       {templates.length > 0 && (
         <div className="suggestion-group">
-          <div className="group-label">Или добавь шаблон на {formatChip(date, today).toLowerCase()}</div>
+          <div className="group-label">Или добавь шаблон на {formatChip(target, today).toLowerCase()}</div>
           <div className="chip-row">
             {templates.map(template => (
               <Action
                 key={template.id}
                 className="suggestion-chip"
                 onClick={() => {
-                  applyTemplate(change, template, date)
+                  applyTemplate(change, template, target)
                   go({ name: 'today' })
                 }}
               >
@@ -317,13 +340,14 @@ function AddScreen({
 /* ─────────────── Дело ─────────────── */
 
 function DetailScreen({
-  data, change, taskId, go, calendar,
+  data, change, taskId, go, calendar, notify,
 }: {
   data: Data
   change: Change
   taskId: string
   go: (route: Route) => void
   calendar: CalendarSync
+  notify: Notify
 }) {
   const task = data.tasks[taskId]
   if (!task || task.deleted) {
@@ -344,6 +368,7 @@ function DetailScreen({
         value={task.title}
         aria-label="Название"
         onChange={event => update({ title: event.target.value })}
+        onBlur={event => !event.target.value.trim() && update({ title: 'Без названия' })}
       />
       <div className="detail-tags">
         {task.tag && <TagChip>{task.tag}</TagChip>}
@@ -357,13 +382,13 @@ function DetailScreen({
       </div>
 
       <section className="detail-section">
+        <div className="group-label">Дата</div>
+        <DateChips value={task.date} onChange={value => update({ date: value })} />
+      </section>
+
+      <section className="detail-section compact">
         <div className="group-label">Время</div>
-        <input
-          className="time-input"
-          type="time"
-          value={task.time ?? ''}
-          onChange={event => update({ time: event.target.value || null })}
-        />
+        <TimeChips value={task.time} onChange={value => update({ time: value })} />
       </section>
 
       <section className="detail-section">
@@ -380,24 +405,6 @@ function DetailScreen({
       <section className="detail-section">
         <div className="group-label">Напоминание</div>
         <CalendarNote calendar={calendar} hasTime={task.time !== null} go={go} />
-      </section>
-
-      <section className="detail-section">
-        <div className="group-label">Перенести</div>
-        <div className="chip-row">
-          {[0, 1, 2, 7].map(days => {
-            const target = addDays(today, days)
-            return (
-              <Action
-                key={days}
-                className={`suggestion-chip ${task.date === target ? 'selected' : ''}`}
-                onClick={() => update({ date: target })}
-              >
-                {days === 7 ? 'Через неделю' : formatChip(target, today)}
-              </Action>
-            )
-          })}
-        </div>
       </section>
 
       <section className="detail-section">
@@ -421,6 +428,7 @@ function DetailScreen({
           label="Удалить"
           onClick={() => {
             update({ deleted: true })
+            notify(`Удалено: ${task.title}`, { label: 'Вернуть', run: () => update({ deleted: false }) })
             go({ name: 'today' })
           }}
         >
@@ -450,18 +458,20 @@ function HabitsScreen({ data, change, go }: { data: Data; change: Change; go: (r
   const habits = Object.values(data.habits).filter(h => !h.deleted).sort((a, b) => a.createdAt - b.createdAt)
   const doneToday = habits.filter(h => h.log[today]).length
 
-  const setHabit = (habit: Habit, fields: Partial<Habit>) =>
-    change(current => ({
-      ...current,
-      habits: { ...current.habits, [habit.id]: { ...habit, ...fields, updatedAt: Date.now() } },
-    }))
+  // Меняем всегда свежую версию привычки: быстрые нажатия подряд не теряются
+  const setHabit = (habit: Habit, fn: (current: Habit) => Partial<Habit>) =>
+    change(current => {
+      const fresh = current.habits[habit.id] ?? habit
+      return { ...current, habits: { ...current.habits, [habit.id]: { ...fresh, ...fn(fresh), updatedAt: Date.now() } } }
+    })
 
-  const toggleDay = (habit: Habit, day: string) => {
-    const log = { ...habit.log }
-    if (log[day]) delete log[day]
-    else log[day] = true
-    setHabit(habit, { log })
-  }
+  const toggleDay = (habit: Habit, day: string) =>
+    setHabit(habit, fresh => {
+      const log = { ...fresh.log }
+      if (log[day]) delete log[day]
+      else log[day] = true
+      return { log }
+    })
 
   const add = () => {
     const title = draft.trim()
@@ -505,7 +515,7 @@ function HabitsScreen({ data, change, go }: { data: Data; change: Change; go: (r
                     </div>
                   </div>
                   {editing && (
-                    <Action className="icon-action small danger" label="Удалить привычку" onClick={() => setHabit(habit, { deleted: true })}>
+                    <Action className="icon-action small danger" label="Удалить привычку" onClick={() => setHabit(habit, () => ({ deleted: true }))}>
                       <Icon name="trash" size="sm" />
                     </Action>
                   )}
@@ -633,7 +643,7 @@ function WeekScreen({
           <div className="stat-card">
             <div className="stat-icon"><Icon name="check" /></div>
             <div className="stat-value">{done}</div>
-            <div className="stat-label">{plural(done, ['Дело сделано', 'Дела сделано', 'Дел сделано'])}</div>
+            <div className="stat-label">Сделано за неделю</div>
           </div>
         </div>
         {best && (
@@ -691,11 +701,10 @@ function ProfileScreen({
   const dayTasks = liveTasks(data, date)
 
   const saveDayAsTemplate = () => {
-    const templateName = window.prompt('Как назвать шаблон?', 'Мой шаблон')?.trim()
-    if (!templateName) return
+    // Создаём шаблон и сразу открываем редактор — там можно переименовать и поправить дела
     const template: Template = {
       id: newId(),
-      name: templateName,
+      name: `Мой день · ${formatChip(date).toLowerCase()}`,
       updatedAt: Date.now(),
       items: dayTasks.map(t => ({ title: t.title, time: t.time, tag: t.tag })),
     }
@@ -850,7 +859,29 @@ export default function App() {
   const store = useStore()
   const { data, change } = store
   const [route, setRoute] = useState<Route>({ name: 'today' })
-  const [date, setDate] = useState(todayKey)
+  // null — «сегодня»: так после полуночи приложение само переходит на новый день
+  const [pickedDate, setPickedDate] = useState<string | null>(null)
+  const [, setWakeTick] = useState(0)
+  const date = pickedDate ?? todayKey()
+  const setDate = (value: string) => setPickedDate(value === todayKey() ? null : value)
+  const [toast, setToast] = useState<Toast | null>(null)
+  const notify: Notify = (text, action) => setToast({ id: Date.now(), text, action })
+
+  useEffect(() => {
+    const wake = () => document.visibilityState === 'visible' && setWakeTick(tick => tick + 1)
+    document.addEventListener('visibilitychange', wake)
+    window.addEventListener('focus', wake)
+    return () => {
+      document.removeEventListener('visibilitychange', wake)
+      window.removeEventListener('focus', wake)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!toast) return
+    const timer = window.setTimeout(() => setToast(null), toast.action ? 5000 : 2500)
+    return () => window.clearTimeout(timer)
+  }, [toast])
   const fullName = store.session?.user.user_metadata?.full_name as string | undefined
   const name = fullName ? fullName.split(' ')[0] : null
 
@@ -861,10 +892,10 @@ export default function App() {
   let content
   switch (route.name) {
     case 'add':
-      content = <AddScreen data={data} change={change} date={date} go={go} />
+      content = <AddScreen data={data} change={change} date={date} go={go} notify={notify} />
       break
     case 'detail':
-      content = <DetailScreen data={data} change={change} taskId={route.taskId} go={go} calendar={calendar} />
+      content = <DetailScreen data={data} change={change} taskId={route.taskId} go={go} calendar={calendar} notify={notify} />
       break
     case 'goals':
       content = <GoalsScreen data={data} go={go} />
@@ -895,6 +926,22 @@ export default function App() {
     <div className="app-shell">
       <div className="phone-frame">
         {content}
+        {toast && (
+          <div className="toast" key={toast.id} role="status">
+            <span>{toast.text}</span>
+            {toast.action && (
+              <Action
+                className="toast-action"
+                onClick={() => {
+                  toast.action?.run()
+                  setToast(null)
+                }}
+              >
+                {toast.action.label}
+              </Action>
+            )}
+          </div>
+        )}
       </div>
     </div>
   )

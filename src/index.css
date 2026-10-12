@@ -1512,6 +1512,92 @@ button.subtask > .icon:last-child {
   color: var(--sage);
 }
 
+/* Плашки даты и времени */
+.suggestion-group.compact,
+.detail-section.compact {
+  margin-top: 18px;
+}
+
+.picker-chip {
+  position: relative;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+/* Настоящее поле даты лежит прозрачным поверх плашки: нажатие открывает системный выбор */
+.picker-chip input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.picker-chip input::-webkit-calendar-picker-indicator {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  cursor: pointer;
+}
+
+.picker-chip:focus-within {
+  outline: 2px solid var(--sage-dark);
+  outline-offset: 2px;
+}
+
+.chip-hint {
+  align-self: center;
+  color: #9aab9e;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/* Всплывающее сообщение */
+.toast {
+  position: absolute;
+  right: 16px;
+  bottom: calc(158px + var(--safe-bottom));
+  left: 16px;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 13px 16px;
+  border-radius: 16px;
+  background: var(--forest);
+  box-shadow: var(--shadow-float);
+  color: var(--white);
+  font-size: 13px;
+  font-weight: 700;
+  animation: toast-in 200ms ease;
+}
+
+.toast span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.toast-action {
+  flex: 0 0 auto;
+  color: var(--sage);
+  font-weight: 800;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+}
+
 /* Календарь */
 .calendar-banner {
   display: flex;
