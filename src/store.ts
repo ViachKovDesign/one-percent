@@ -18,6 +18,30 @@ export function prepareDay(data: Data): Data {
 
 export type SyncStatus = 'local' | 'syncing' | 'synced' | 'offline' | 'error'
 
+const PRISTINE_KEY = 'one-percent:pristine'
+
+/**
+ * «Нетронутое» устройство: данные — только стандартные шаблоны и привычки, человек ещё ничего не менял.
+ * При первом входе такое устройство берёт данные из облака целиком, а не склеивает со своими —
+ * иначе стандартные шаблоны и привычки задвоятся.
+ */
+function isPristine(): boolean {
+  try {
+    return localStorage.getItem(PRISTINE_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+function setPristine(value: boolean) {
+  try {
+    if (value) localStorage.setItem(PRISTINE_KEY, '1')
+    else localStorage.removeItem(PRISTINE_KEY)
+  } catch {
+    // без хранилища считаем устройство обычным
+  }
+}
+
 function loadLocal(): Data {
   try {
     const raw = localStorage.getItem(LOCAL_KEY)
@@ -25,6 +49,7 @@ function loadLocal(): Data {
   } catch {
     // повреждённые или недоступные данные — начинаем с чистого листа
   }
+  setPristine(true)
   return emptyData()
 }
 
@@ -70,10 +95,13 @@ export function useStore() {
     setStatus('syncing')
     try {
       const remote = await pullRemote(supabase, userId)
-      const merged = prepareDay(remote ? merge(dataRef.current, remote) : dataRef.current)
+      const base = remote ? (isPristine() ? remote : merge(dataRef.current, remote)) : dataRef.current
+      const merged = prepareDay(base)
       await pushRemote(supabase, userId, merged)
       // Пока шёл запрос, могли появиться новые правки: доклеиваем их сверху.
-      const latest = merge(merged, dataRef.current)
+      // Нетронутое устройство ничего своего не добавляет — берём облако как есть.
+      const latest = isPristine() ? merged : merge(merged, dataRef.current)
+      setPristine(false)
       dataRef.current = latest
       setData(latest)
       saveLocal(latest)
@@ -141,6 +169,7 @@ export function useStore() {
         saveLocal(next)
         return next
       })
+      setPristine(false)
       window.clearTimeout(timer.current)
       timer.current = window.setTimeout(() => void sync(), 1000)
     },
