@@ -7,4 +7,5 @@ export const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY ?? ''
 
 // Google Календарь: «ID клиента OAuth» из Google Cloud Console (APIs & Services → Credentials).
 // Это не секрет — он виден любому, кто открывает сайт. Пустая строка — синхронизация выключена.
-export const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID ?? ''
+export const GOOGLE_CLIENT_ID =
+  import.meta.env.VITE_GOOGLE_CLIENT_ID || '713330032288-ks4iehvju8r7vjrjigrqebt76c3c6dg3.apps.googleusercontent.com'

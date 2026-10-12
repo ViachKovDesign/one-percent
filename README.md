@@ -42,9 +42,9 @@
 5. **Clients → Create client** → тип **Web application**:
    - Authorized JavaScript origins: `https://viachkovdesign.github.io`
    - Authorized redirect URIs: `https://viachkovdesign.github.io/one-percent/`
-6. Скопируй **Client ID** (вида `1234…apps.googleusercontent.com`) и добавь его в репозиторий:
-   **Settings → Secrets and variables → Actions → Variables** → `GOOGLE_CLIENT_ID`,
-   затем **Actions → «Публикация на GitHub Pages» → Run workflow**.
+6. Скопируй **Client ID** (вида `1234…apps.googleusercontent.com`) и впиши его в `src/config.ts`
+   (или в переменную репозитория `GOOGLE_CLIENT_ID`: **Settings → Secrets and variables → Actions → Variables**).
+   Это не секрет — он и так виден любому, кто открывает сайт.
 7. В приложении: **Профиль → Подключить Google Календарь**. Google покажет предупреждение
    «приложение не проверено» — это нормально для личного приложения: «Продолжить».
 
