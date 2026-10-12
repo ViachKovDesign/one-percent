@@ -16,3 +16,8 @@ create policy "insert own" on public.user_data
   for insert with check (auth.uid() = user_id);
 create policy "update own" on public.user_data
   for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+-- Защита бесплатного лимита: одна строка не больше 2 МБ (обычно у человека — десятки КБ).
+-- Выполнить отдельно, если таблица уже создана.
+alter table public.user_data
+  add constraint user_data_size_limit check (octet_length(data::text) < 2000000);

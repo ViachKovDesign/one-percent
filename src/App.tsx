@@ -804,7 +804,16 @@ function ProfileScreen({
                   <Action className="suggestion-chip" onClick={() => void store.sync()}>
                     <Icon name="repeat" size="sm" /> Синхронизировать
                   </Action>
-                  <Action className="suggestion-chip" onClick={() => void store.signOut()}>Выйти</Action>
+                  <Action
+                    className="suggestion-chip"
+                    onClick={async () => {
+                      if (!window.confirm('Выйти? Дела останутся в облаке, а с этого устройства будут стёрты.')) return
+                      // Вместе с аккаунтом отключаем и календарь на этом устройстве
+                      if (await store.signOut()) calendar.disconnect()
+                    }}
+                  >
+                    Выйти
+                  </Action>
                 </div>
               </>
             ) : (

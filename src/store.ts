@@ -125,12 +125,13 @@ export function useStore() {
 
   dataRef.current = data
 
-  const sync = useCallback(async () => {
+  /** Сверяет с облаком. true — всё сохранено, false — не получилось (нет сети, ошибка). */
+  const sync = useCallback(async (): Promise<boolean> => {
     const userId = session?.user.id
-    if (!supabase || !userId || syncing.current) return
+    if (!supabase || !userId || syncing.current) return false
     if (!navigator.onLine) {
       setStatus('offline')
-      return
+      return false
     }
     syncing.current = true
     setStatus('syncing')
@@ -148,9 +149,11 @@ export function useStore() {
       saveLocal(latest)
       setStatus('synced')
       setSyncError(null)
+      return true
     } catch (error) {
       setStatus(navigator.onLine ? 'error' : 'offline')
       if (navigator.onLine) setSyncError(explainAuthError((error as { message?: string })?.message ?? String(error)))
+      return false
     } finally {
       syncing.current = false
     }
@@ -243,10 +246,29 @@ export function useStore() {
     })
   }, [])
 
-  const signOut = useCallback(async () => {
-    if (!supabase) return
+  /**
+   * Выход: сначала сохраняем последние изменения в облако, потом стираем дела с этого устройства —
+   * чтобы на чужом компьютере после выхода никто их не увидел. В облаке всё остаётся.
+   * Возвращает false, если человек передумал выходить.
+   */
+  const signOut = useCallback(async (): Promise<boolean> => {
+    if (!supabase) return false
+    const saved = await sync()
+    if (!saved && !window.confirm('Не получилось сохранить последние изменения в облако. Всё равно выйти? Несохранённое пропадёт.')) {
+      return false
+    }
     await supabase.auth.signOut()
-  }, [])
+    try {
+      localStorage.removeItem(LOCAL_KEY)
+    } catch {
+      // нечего стирать
+    }
+    setPristine(true)
+    const fresh = prepareDay(emptyData())
+    dataRef.current = fresh
+    setData(fresh)
+    return true
+  }, [sync])
 
   return { data, change, session, status, signIn, signOut, canSync: Boolean(supabase), sync, authError, syncError }
 }
