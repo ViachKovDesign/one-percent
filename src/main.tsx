@@ -1,7 +1,11 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import App from './App'
+import { handleGoogleRedirect } from './gcal'
 import './index.css'
+
+// Вернулись со страницы входа Google — забираем доступ к календарю из адреса
+handleGoogleRedirect()
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

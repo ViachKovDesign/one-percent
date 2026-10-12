@@ -1,11 +1,12 @@
 import { useState } from 'react'
-import { getRemindMin } from './calendar'
+import { CalendarNote } from './calendarUi'
+import type { CalendarSync } from './gcal'
 import { addDays, formatChip, formatDayMonth, formatLong, fromKey, plural, todayKey, toKey, WEEKDAYS_SHORT } from './dates'
 import {
-  ensureGoalTasks, goalProgress, goalTaskId, isStepDay, liveGoals, newId,
+  ensureGoalWeek, goalProgress, goalTaskId, liveGoals, newId,
   type Data, type Goal, type GoalProgress,
 } from './model'
-import type { AskCalendar, Change, Go } from './nav'
+import type { Change, Go } from './nav'
 import {
   Action, BottomNav, Checkbox, Icon, Leaf, PercentRing, ProgressBar, ScreenHeader, TagChip,
 } from './ui'
@@ -100,13 +101,13 @@ export function GoalsScreen({ data, go }: { data: Data; go: Go }) {
 /* ─────────────── Одна цель ─────────────── */
 
 export function GoalScreen({
-  data, change, goalId, go, askCalendar,
+  data, change, goalId, go, calendar,
 }: {
   data: Data
   change: Change
   goalId: string
   go: Go
-  askCalendar: AskCalendar
+  calendar: CalendarSync
 }) {
   const [draft, setDraft] = useState('')
   const goal = data.goals[goalId]
@@ -151,10 +152,6 @@ export function GoalScreen({
     setGoal({ milestones: [...goal.milestones, { id: newId(), title, done: false }] })
     setDraft('')
   }
-
-  // Первое занятие в календаре — ближайший день с шагом, начиная с сегодня
-  let first = today < goal.start ? goal.start : today
-  while (first <= goal.deadline && !isStepDay(goal, first)) first = addDays(first, 1)
 
   return (
     <main className="screen detail-screen">
@@ -249,34 +246,7 @@ export function GoalScreen({
 
       <section className="detail-section">
         <div className="group-label">Напоминания</div>
-        <Action
-          className="calendar-card"
-          disabled={first > goal.deadline}
-          onClick={() =>
-            askCalendar({
-              title: `${goal.step} — ${stepDaysText(goal.weekdays)}`,
-              fileName: 'tsel',
-              events: [{
-                uid: `goal-${goal.id}`,
-                title: goal.step,
-                date: first,
-                time: goal.time,
-                description: `Цель «${goal.title}» до ${formatDayMonth(goal.deadline)}. Приложение «1%».`,
-                remindMin: getRemindMin(),
-                repeat: { weekdays: goal.weekdays, until: goal.deadline },
-              }],
-            })
-          }
-        >
-          <div className="stat-icon peach"><Icon name="calendar" /></div>
-          <div className="grow">
-            <div className="recognition-label">Повторять в календаре</div>
-            <div className="muted-copy">
-              {stepDaysText(goal.weekdays)}{goal.time ? ` в ${goal.time}` : ''} до {formatDayMonth(goal.deadline)}
-            </div>
-          </div>
-          <Icon name="chevron" size="sm" />
-        </Action>
+        <CalendarNote calendar={calendar} hasTime={goal.time !== null} go={go} />
       </section>
 
       <div className="bottom-actions">
@@ -362,7 +332,7 @@ export function GoalEditScreen({
       deadline,
       updatedAt: now,
     }
-    change(current => ensureGoalTasks({ ...current, goals: { ...current.goals, [goal.id]: goal } }))
+    change(current => ensureGoalWeek({ ...current, goals: { ...current.goals, [goal.id]: goal } }))
     go({ name: 'goal', goalId: goal.id })
   }
 

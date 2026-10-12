@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  dayStreak, ensureGoalTasks, goalProgress, goalTaskId, habitStreak, makeTask, merge, rollOver,
+  dayStreak, ensureGoalTasks, ensureGoalWeek, goalProgress, goalTaskId, habitStreak, makeTask, merge, rollOver,
   type Data, type Goal,
 } from './model'
 
@@ -54,6 +54,14 @@ describe('goals', () => {
     expect(once.tasks[goalTaskId('g', '2026-10-12')]).toMatchObject({ title: 'Урок Tilda', time: '19:00', goalId: 'g' })
     expect(ensureGoalTasks(once, '2026-10-12')).toBe(once)
     expect(ensureGoalTasks(withGoal, '2026-10-17').tasks).toEqual({})
+  })
+
+  it('кладёт шаги на неделю вперёд и убирает их, если день исключили', () => {
+    const week = ensureGoalWeek(withGoal, '2026-10-12')
+    const ids = Object.keys(week.tasks).sort()
+    expect(ids).toEqual(['2026-10-12', '2026-10-13', '2026-10-14', '2026-10-15', '2026-10-16'].map(d => goalTaskId('g', d)))
+    const noFriday = { ...week, goals: { g: { ...goal, weekdays: [1, 2, 3, 4] } } }
+    expect(ensureGoalWeek(noFriday, '2026-10-12').tasks[goalTaskId('g', '2026-10-16')].deleted).toBe(true)
   })
 
   it('не возвращает удалённый вручную шаг', () => {

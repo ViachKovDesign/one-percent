@@ -7,10 +7,10 @@ import {
   dayStreak, goalProgress, habitStreak, liveGoals, liveTasks, makeTask, newId,
   type Data, type Habit, type Task, type Template,
 } from './model'
-import { getRemindMin, setRemindMin } from './calendar'
-import { CalendarSheet } from './calendarSheet'
+import { CalendarBanner, CalendarNote } from './calendarUi'
+import { getRemindMin, setRemindMin, useCalendarSync, type CalendarSync } from './gcal'
 import { GoalEditScreen, GoalScreen, GoalsScreen } from './goals'
-import { taskEvent, type AskCalendar, type CalendarRequest, type Change, type Route } from './nav'
+import type { Change, Route } from './nav'
 import { parseQuick } from './parse'
 import { useStore, type SyncStatus } from './store'
 import { TemplateEditScreen } from './templates'
@@ -82,7 +82,7 @@ function progressTitle(done: number, total: number): [string, string] {
 }
 
 function TodayScreen({
-  data, change, date, setDate, go, name, askCalendar,
+  data, change, date, setDate, go, name, calendar,
 }: {
   data: Data
   change: Change
@@ -90,7 +90,7 @@ function TodayScreen({
   setDate: (date: string) => void
   go: (route: Route) => void
   name: string | null
-  askCalendar: AskCalendar
+  calendar: CalendarSync
 }) {
   const today = todayKey()
   const tasks = liveTasks(data, date)
@@ -98,11 +98,11 @@ function TodayScreen({
   const [title, subtitle] = progressTitle(done, tasks.length)
   const templates = liveTemplates(data)
   const goals = liveGoals(data)
-  const open = tasks.filter(t => !t.done)
 
   return (
     <>
       <main className="screen today-screen">
+        <CalendarBanner calendar={calendar} />
         <div className="top-row">
           <div>
             <div className="eyebrow">{formatLong(date)}</div>
@@ -150,24 +150,9 @@ function TodayScreen({
 
         <div className="section-heading">
           <div className="section-title">Твой день</div>
-          {open.length > 0 ? (
-            <Action
-              className="text-button with-icon"
-              onClick={() =>
-                askCalendar({
-                  title: `${formatRelative(date)}: ${open.length} ${plural(open.length, ['дело', 'дела', 'дел'])}`,
-                  fileName: `den-${date}`,
-                  events: open.map(taskEvent),
-                })
-              }
-            >
-              <Icon name="calendar" size="sm" /> В календарь
-            </Action>
-          ) : (
-            <span className="count-label">
-              {tasks.length} {plural(tasks.length, ['дело', 'дела', 'дел'])}
-            </span>
-          )}
+          <span className="count-label">
+            {tasks.length} {plural(tasks.length, ['дело', 'дела', 'дел'])}
+          </span>
         </div>
 
         {tasks.length > 0 && (
@@ -332,13 +317,13 @@ function AddScreen({
 /* ─────────────── Дело ─────────────── */
 
 function DetailScreen({
-  data, change, taskId, go, askCalendar,
+  data, change, taskId, go, calendar,
 }: {
   data: Data
   change: Change
   taskId: string
   go: (route: Route) => void
-  askCalendar: AskCalendar
+  calendar: CalendarSync
 }) {
   const task = data.tasks[taskId]
   if (!task || task.deleted) {
@@ -394,21 +379,7 @@ function DetailScreen({
 
       <section className="detail-section">
         <div className="group-label">Напоминание</div>
-        <Action
-          className="calendar-card"
-          onClick={() => askCalendar({ title: task.title, fileName: 'delo', events: [taskEvent(task)] })}
-        >
-          <div className="stat-icon peach"><Icon name="calendar" /></div>
-          <div className="grow">
-            <div className="recognition-label">Добавить в календарь</div>
-            <div className="muted-copy">
-              {task.time
-                ? `${formatChip(task.date, today)}, ${task.time} · напомню за ${getRemindMin()} мин`
-                : 'Без времени — напомню в 9:00. Поставь время выше, чтобы точнее.'}
-            </div>
-          </div>
-          <Icon name="chevron" size="sm" />
-        </Action>
+        <CalendarNote calendar={calendar} hasTime={task.time !== null} go={go} />
       </section>
 
       <section className="detail-section">
@@ -693,8 +664,16 @@ const STATUS_TEXT: Record<SyncStatus, string> = {
   error: 'Не получилось синхронизировать, попробую ещё раз',
 }
 
+const CALENDAR_STATUS: Record<CalendarSync['status'], string> = {
+  off: 'Выключен',
+  synced: 'Всё в календаре',
+  syncing: 'Обновляю календарь…',
+  'needs-login': 'Google просит войти заново — нажми «Обновить доступ»',
+  error: 'Нет связи с календарём, попробую ещё раз',
+}
+
 function ProfileScreen({
-  data, change, date, go, store, name,
+  data, change, date, go, store, name, calendar,
 }: {
   data: Data
   change: Change
@@ -702,6 +681,7 @@ function ProfileScreen({
   go: (route: Route) => void
   store: ReturnType<typeof useStore>
   name: string | null
+  calendar: CalendarSync
 }) {
   const templates = liveTemplates(data)
   const growingDays = useMemo(
@@ -741,11 +721,70 @@ function ProfileScreen({
         </div>
 
         <section className="profile-section">
-          <div className="group-label">Аккаунт</div>
+          <div className="group-label">Google Календарь</div>
+          <div className="settings-card">
+            {!calendar.configured ? (
+              <div className="muted-copy">
+                Синхронизация с календарём заработает после настройки доступа Google (один раз, инструкция в README).
+              </div>
+            ) : !calendar.enabled ? (
+              <>
+                <div className="muted-copy">
+                  Дела со временем и шаги целей появятся в твоём календаре с напоминанием. Отметил «готово» — событие
+                  станет «✓» и без напоминания, удалил — исчезнет из календаря.
+                </div>
+                <Action className="primary-button google" onClick={calendar.connect}>
+                  <Icon name="calendar" size="sm" /> Подключить Google Календарь
+                </Action>
+              </>
+            ) : (
+              <>
+                <div className="recognition-label">Календарь подключён</div>
+                <div className={`muted-copy status-${calendar.status === 'synced' ? 'synced' : calendar.status === 'error' ? 'error' : 'local'}`}>
+                  {CALENDAR_STATUS[calendar.status]}
+                  {calendar.status === 'synced' ? ` · ${calendar.count} ${plural(calendar.count, ['событие', 'события', 'событий'])}` : ''}
+                </div>
+                <div className="muted-copy calendar-hint">За сколько минут напоминать:</div>
+                <div className="chip-row">
+                  {[5, 10, 15, 30, 60].map(minutes => (
+                    <Action
+                      key={minutes}
+                      className={`suggestion-chip ${remind === minutes ? 'selected' : ''}`}
+                      onClick={() => {
+                        setRemindMin(minutes)
+                        setRemind(minutes)
+                        calendar.resync()
+                      }}
+                    >
+                      {minutes === 60 ? '1 час' : `${minutes} мин`}
+                    </Action>
+                  ))}
+                </div>
+                <div className="chip-row">
+                  {calendar.status === 'needs-login' && (
+                    <Action className="suggestion-chip selected" onClick={calendar.refresh}>
+                      <Icon name="repeat" size="sm" /> Обновить доступ
+                    </Action>
+                  )}
+                  <Action
+                    className="suggestion-chip"
+                    onClick={() => window.confirm('Отключить календарь? События, которые уже там, останутся.') && calendar.disconnect()}
+                  >
+                    Отключить
+                  </Action>
+                </div>
+              </>
+            )}
+          </div>
+        </section>
+
+        <section className="profile-section">
+          <div className="group-label">Дела на всех устройствах</div>
           <div className="settings-card">
             {!store.canSync ? (
               <div className="muted-copy">
-                Вход через Google заработает после подключения базы Supabase. Пока всё хранится на этом устройстве.
+                Пока дела хранятся на этом устройстве. Общий список на телефоне и компьютере появится после подключения
+                базы (Supabase) — это отдельный шаг.
               </div>
             ) : store.session ? (
               <>
@@ -799,26 +838,6 @@ function ProfileScreen({
           </div>
         </section>
 
-        <section className="profile-section">
-          <div className="group-label">Напоминания в календаре</div>
-          <div className="settings-card">
-            <div className="muted-copy">За сколько минут до дела напоминать:</div>
-            <div className="chip-row">
-              {[5, 10, 15, 30, 60].map(minutes => (
-                <Action
-                  key={minutes}
-                  className={`suggestion-chip ${remind === minutes ? 'selected' : ''}`}
-                  onClick={() => {
-                    setRemindMin(minutes)
-                    setRemind(minutes)
-                  }}
-                >
-                  {minutes === 60 ? '1 час' : `${minutes} мин`}
-                </Action>
-              ))}
-            </div>
-          </div>
-        </section>
       </main>
       <BottomNav tab="profile" navigate={tab => go({ name: tab })} />
     </>
@@ -835,7 +854,7 @@ export default function App() {
   const fullName = store.session?.user.user_metadata?.full_name as string | undefined
   const name = fullName ? fullName.split(' ')[0] : null
 
-  const [calendar, setCalendar] = useState<CalendarRequest | null>(null)
+  const calendar = useCalendarSync(data)
 
   const go = (next: Route) => setRoute(next)
 
@@ -845,13 +864,13 @@ export default function App() {
       content = <AddScreen data={data} change={change} date={date} go={go} />
       break
     case 'detail':
-      content = <DetailScreen data={data} change={change} taskId={route.taskId} go={go} askCalendar={setCalendar} />
+      content = <DetailScreen data={data} change={change} taskId={route.taskId} go={go} calendar={calendar} />
       break
     case 'goals':
       content = <GoalsScreen data={data} go={go} />
       break
     case 'goal':
-      content = <GoalScreen data={data} change={change} goalId={route.goalId} go={go} askCalendar={setCalendar} />
+      content = <GoalScreen data={data} change={change} goalId={route.goalId} go={go} calendar={calendar} />
       break
     case 'goal-edit':
       content = <GoalEditScreen key={route.goalId ?? 'new'} data={data} change={change} goalId={route.goalId} go={go} />
@@ -866,17 +885,16 @@ export default function App() {
       content = <WeekScreen data={data} setDate={setDate} go={go} />
       break
     case 'profile':
-      content = <ProfileScreen data={data} change={change} date={date} go={go} store={store} name={name} />
+      content = <ProfileScreen data={data} change={change} date={date} go={go} store={store} name={name} calendar={calendar} />
       break
     default:
-      content = <TodayScreen data={data} change={change} date={date} setDate={setDate} go={go} name={name} askCalendar={setCalendar} />
+      content = <TodayScreen data={data} change={change} date={date} setDate={setDate} go={go} name={name} calendar={calendar} />
   }
 
   return (
     <div className="app-shell">
       <div className="phone-frame">
         {content}
-        {calendar && <CalendarSheet request={calendar} onClose={() => setCalendar(null)} />}
       </div>
     </div>
   )

@@ -1,16 +1,16 @@
 import { createClient, type Session, type SupabaseClient } from '@supabase/supabase-js'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { SUPABASE_ANON_KEY, SUPABASE_URL } from './config'
-import { emptyData, ensureGoalTasks, merge, normalize, rollOver, type Data } from './model'
+import { emptyData, ensureGoalWeek, merge, normalize, rollOver, type Data } from './model'
 
 const LOCAL_KEY = 'one-percent:data'
 
 export const supabase: SupabaseClient | null =
   SUPABASE_URL && SUPABASE_ANON_KEY ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null
 
-/** Утренняя подготовка дня: перенос невыполненного и шаги целей на сегодня. */
-function prepareDay(data: Data): Data {
-  return ensureGoalTasks(rollOver(data))
+/** Утренняя подготовка дня: перенос невыполненного и шаги целей на неделю вперёд. */
+export function prepareDay(data: Data): Data {
+  return ensureGoalWeek(rollOver(data))
 }
 
 export type SyncStatus = 'local' | 'syncing' | 'synced' | 'offline' | 'error'

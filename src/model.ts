@@ -241,9 +241,16 @@ export function goalTaskId(goalId: string, date: string): string {
 export function ensureGoalTasks(data: Data, date = todayKey()): Data {
   let tasks: Record<string, Task> | null = null
   for (const goal of liveGoals(data)) {
-    if (!isStepDay(goal, date)) continue
     const id = goalTaskId(goal.id, date)
     const existing = data.tasks[id]
+    if (!isStepDay(goal, date)) {
+      // День убрали из расписания цели — невыполненный шаг больше не нужен
+      if (existing && !existing.done && !existing.deleted) {
+        tasks ??= { ...data.tasks }
+        tasks[id] = { ...existing, deleted: true, updatedAt: Date.now() }
+      }
+      continue
+    }
     if (!existing) {
       tasks ??= { ...data.tasks }
       tasks[id] = { ...makeTask({ title: goal.step, date, time: goal.time, tag: 'цель', goalId: goal.id }), id }
@@ -253,6 +260,15 @@ export function ensureGoalTasks(data: Data, date = todayKey()): Data {
     }
   }
   return tasks ? { ...data, tasks } : data
+}
+
+/** Шаги целей на неделю вперёд: так напоминания в календаре стоят заранее. */
+export const GOAL_DAYS_AHEAD = 7
+
+export function ensureGoalWeek(data: Data, today = todayKey()): Data {
+  let next = data
+  for (let i = 0; i < GOAL_DAYS_AHEAD; i += 1) next = ensureGoalTasks(next, addDays(today, i))
+  return next
 }
 
 export type GoalProgress = {
